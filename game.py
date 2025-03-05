@@ -1032,6 +1032,7 @@ class Game:
                 if self.settings["particles"] and impact_speed > 50:
                     self.particle_system.add_explosion(
                         self.ball.x, self.ball.y,
+                        color=(255, 255, 255),  # Adding white color for wall collisions
                         count=int(5 + impact_speed / 30), 
                         speed=impact_speed * 0.12,
                         size_range=(2, 6),
@@ -1120,8 +1121,8 @@ class Game:
         # Calculate and store completion time
         self.completion_time = self._get_level_time_limit(self.current_level) - self.time_remaining
         
-        # Calculate stars based on time remaining
-        stars = self._calculate_stars(self.time_remaining)
+        # Calculate stars based on completion time, not remaining time
+        stars = self._calculate_stars(self.completion_time)
         
         # Calculate performance scores
         performance_scores = self._calculate_performance_score()
@@ -1659,9 +1660,18 @@ class Game:
         level_rect = level_text.get_rect(center=(WIDTH//2, 160))
         self.screen.blit(level_text, level_rect)
         
-        # Draw stars
-        stars = self.levels_data["stars"].get(str(self.current_level), 0)
-        self._draw_stars(WIDTH//2, 220, stars, 40)
+        # Store current stars for this run
+        self.current_run_stars = self._calculate_stars(self.completion_time)
+        
+        # Draw stars - use current run stars, not saved stars
+        self._draw_stars(WIDTH//2, 220, self.current_run_stars, 40)
+        
+        # Draw previous best (if different)
+        saved_stars = self.levels_data["stars"].get(str(self.current_level), 0)
+        if saved_stars != self.current_run_stars:
+            prev_text = self.small_font.render(f"Previous best: {saved_stars} ★", True, (180, 180, 180))
+            prev_rect = prev_text.get_rect(center=(WIDTH//2, 255))
+            self.screen.blit(prev_text, prev_rect)
         
         # Draw score
         score_text = self.regular_font.render(f"Score: {self.score}", True, WHITE)
