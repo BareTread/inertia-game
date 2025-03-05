@@ -1196,11 +1196,11 @@ class Game:
             # Add explosion at ball position
             self.particle_system.add_explosion(
                 self.ball.x, self.ball.y,
-                (255, 0, 0),  # Red color
-                100,  # Particle count
-                (50, 150),  # Speed range
-                (2, 5),  # Size range
-                (0.5, 1.5),  # Lifetime range
+                color=(255, 0, 0),  # Red color
+                count=100,  # Particle count
+                speed=100,  # Speed value
+                size_range=(2, 5),  # Size range
+                lifetime_range=(0.5, 1.5),  # Lifetime range
                 glow=True  # Enable glow
             )
             
