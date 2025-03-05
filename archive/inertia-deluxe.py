@@ -143,7 +143,9 @@ def play_music(music_name, loop=True):
     if MUSIC[music_name]:
         try:
             pygame.mixer.music.load(MUSIC[music_name])
-            pygame.mixer.music.set_volume(0.5)
+            # Use the volume from settings
+            volume = game.settings["music_volume"] if 'game' in globals() else 0.5
+            pygame.mixer.music.set_volume(volume)
             pygame.mixer.music.play(-1 if loop else 0)
         except Exception as e:
             print(f"Error playing music {music_name}: {e}")
@@ -340,7 +342,7 @@ class Toast:
         surface.blit(text_surface, self.rect)
 
 class Slider:
-    def __init__(self, x, y, width, height, min_value, max_value, current_value, text="", color=BLUE):
+    def __init__(self, x, y, width, height, min_value, max_value, current_value, text="", color=BLUE, show_as_percent=False):
         self.rect = pygame.Rect(x, y, width, height)
         self.min_value = min_value
         self.max_value = max_value
@@ -349,6 +351,7 @@ class Slider:
         self.color = color
         self.text = text
         self.dragging = False
+        self.show_as_percent = show_as_percent
         
     def get_handle_pos(self):
         value_range = self.max_value - self.min_value
@@ -392,7 +395,10 @@ class Slider:
         
         # Draw value text
         if self.text:
-            value_text = f"{self.text}: {int(self.current_value)}"
+            if self.show_as_percent:
+                value_text = f"{self.text}: {int(self.current_value * 100)}%"
+            else:
+                value_text = f"{self.text}: {int(self.current_value)}"
             text_surf = small_font.render(value_text, True, WHITE)
             text_rect = text_surf.get_rect(midleft=(self.rect.right + 20, self.rect.centery))
             surface.blit(text_surf, text_rect)
@@ -1994,9 +2000,9 @@ class Game:
         
         self.settings_sliders = {
             "music_volume": Slider(slider_x, center_y - slider_spacing*2, slider_width, slider_height, 
-                                  0, 1, self.settings["music_volume"], "Music Volume"),
+                                  0, 1, self.settings["music_volume"], "Music Volume", show_as_percent=True),
             "sound_volume": Slider(slider_x, center_y - slider_spacing, slider_width, slider_height, 
-                                  0, 1, self.settings["sound_volume"], "Sound Volume")
+                                  0, 1, self.settings["sound_volume"], "Sound Volume", show_as_percent=True)
         }
         
         # Toggle buttons for boolean settings
@@ -2016,38 +2022,45 @@ class Game:
         self.create_level_select_buttons()
     
     def create_level_select_buttons(self):
-        """Create level selection grid"""
+        """Create buttons for level selection screen"""
         self.level_select_buttons = []
         
-        levels_per_row = 5
+        # Calculate grid dimensions
+        grid_cols = 5
+        grid_rows = 5
         button_size = 80
         spacing = 20
-        start_x = (WIDTH - (levels_per_row * button_size + (levels_per_row - 1) * spacing)) // 2
-        start_y = 150
         
+        # Calculate starting position to center the grid
+        start_x = (WIDTH - (grid_cols * button_size + (grid_cols - 1) * spacing)) // 2
+        start_y = 180
+        
+        # Get highest unlocked level
+        self.max_unlocked_level = self.level_data.get("unlocked", 1)
+        
+        # Create button for each level
         for level in range(1, MAX_LEVELS + 1):
-            row = (level - 1) // levels_per_row
-            col = (level - 1) % levels_per_row
+            row = (level - 1) // grid_cols
+            col = (level - 1) % grid_cols
             
             x = start_x + col * (button_size + spacing)
-            y = start_y + row * (button_size + spacing)
+            y = start_y + row * (button_size + spacing + 30)  # Extra space for stars
             
-            # Get stars for this level
-            level_key = str(level)
-            stars = self.level_data.get("stars", {}).get(level_key, 0)
+            # Get stars collected for this level
+            stars = self.level_data.get("stars", {}).get(str(level), 0)
             
             # Check if level is unlocked
-            is_unlocked = level <= self.max_unlocked_level
+            unlocked = level <= self.max_unlocked_level
             
-            button = {
-                "rect": pygame.Rect(x, y, button_size, button_size),
+            # Create button data (we'll draw these manually)
+            self.level_select_buttons.append({
                 "level": level,
+                "rect": pygame.Rect(x, y, button_size, button_size),
                 "stars": stars,
-                "unlocked": is_unlocked,
-                "hover": False
-            }
-            
-            self.level_select_buttons.append(button)
+                "unlocked": unlocked,
+                "hover": False,
+                "pulse": 0
+            })
     
     def update_level_select_buttons(self):
         """Update level selection buttons with current progress"""
@@ -3602,11 +3615,301 @@ class Game:
                 life_range=(0.5, 1.5)
             )
     
+    def draw_game_over(self, surface):
+        """Draw game over screen"""
+        # First draw the game state behind
+        self.draw_game(surface)
+        
+        # Add overlay
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        surface.blit(overlay, (0, 0))
+        
+        # Draw game over text
+        game_over_text = heading_font.render("GAME OVER", True, RED)
+        game_over_rect = game_over_text.get_rect(center=(WIDTH//2, HEIGHT//3))
+        surface.blit(game_over_text, game_over_rect)
+        
+        # Draw reason text
+        if self.game_over_reason:
+            reason_text = medium_font.render(self.game_over_reason, True, WHITE)
+            reason_rect = reason_text.get_rect(center=(WIDTH//2, game_over_rect.bottom + 30))
+            surface.blit(reason_text, reason_rect)
+            
+        # Draw buttons
+        for button in self.menu_buttons["game_over"]:
+            button.draw(surface)
+    
+    def draw_settings(self, surface):
+        """Draw settings screen"""
+        # Draw background
+        self.draw_menu_background(surface)
+        
+        # Draw title with a decorative underline
+        title_text = heading_font.render("SETTINGS", True, WHITE)
+        title_rect = title_text.get_rect(center=(WIDTH//2, 70))
+        surface.blit(title_text, title_rect)
+        
+        # Draw decorative underline
+        underline_width = title_rect.width + 40
+        pygame.draw.line(surface, CYAN, 
+                        (WIDTH//2 - underline_width//2, title_rect.bottom + 10),
+                        (WIDTH//2 + underline_width//2, title_rect.bottom + 10), 3)
+        
+        # Draw settings panel background
+        panel_rect = pygame.Rect(WIDTH//2 - 200, title_rect.bottom + 30, 400, 350)
+        pygame.draw.rect(surface, (40, 50, 60), panel_rect, border_radius=15)
+        pygame.draw.rect(surface, (80, 100, 120), panel_rect, 2, border_radius=15)
+        
+        # Draw section title
+        section_text = medium_font.render("Audio", True, CYAN)
+        section_rect = section_text.get_rect(topleft=(panel_rect.left + 20, panel_rect.top + 20))
+        surface.blit(section_text, section_rect)
+        
+        # Draw sliders
+        for i, (key, slider) in enumerate(self.settings_sliders.items()):
+            # Adjust slider position to be inside the panel
+            slider.rect.x = panel_rect.left + 50
+            slider.rect.y = section_rect.bottom + 20 + i * 70
+            slider.draw(surface)
+        
+        # Draw section title for display settings
+        display_text = medium_font.render("Display", True, CYAN)
+        display_rect = display_text.get_rect(topleft=(panel_rect.left + 20, self.settings_sliders["sound_volume"].rect.bottom + 30))
+        surface.blit(display_text, display_rect)
+        
+        # Draw toggle buttons
+        for i, button in enumerate(self.settings_toggle_buttons):
+            # Adjust button position to be inside the panel
+            button.rect.x = panel_rect.left + 50
+            button.rect.y = display_rect.bottom + 20 + i * 60
+            button.draw(surface)
+            
+        # Draw back button
+        for button in self.menu_buttons["settings"]:
+            button.draw(surface)
+            
+        # Draw version info
+        version_text = small_font.render("v1.0.0", True, (150, 150, 150))
+        version_rect = version_text.get_rect(bottomright=(WIDTH - 10, HEIGHT - 10))
+        surface.blit(version_text, version_rect)
+    
+    def draw_credits(self, surface):
+        """Draw credits screen"""
+        # Draw background
+        self.draw_menu_background(surface)
+        
+        # Draw title
+        title_text = heading_font.render("CREDITS", True, WHITE)
+        title_rect = title_text.get_rect(center=(WIDTH//2, 70))
+        surface.blit(title_text, title_rect)
+        
+        # Draw credits content
+        credits = [
+            "Inertia: Deluxe Edition",
+            "",
+            "A game by PyGameLegends",
+            "",
+            "Programming: The Python Team",
+            "Art & Design: Creative Studios",
+            "Sound Effects: Audio Masters",
+            "Music: Melodic Minds",
+            "",
+            "Made with PyGame",
+            "",
+            "Thanks for playing!"
+        ]
+        
+        y = 150
+        for line in credits:
+            if line:
+                text = medium_font.render(line, True, WHITE)
+            else:
+                text = medium_font.render(" ", True, WHITE)  # Empty line
+                
+            text_rect = text.get_rect(center=(WIDTH//2, y))
+            surface.blit(text, text_rect)
+            y += 30
+            
+        # Draw back button
+        for button in self.menu_buttons["settings"]:
+            button.draw(surface)
+    
+    def draw_tutorial(self, surface):
+        """Draw tutorial screen"""
+        # First draw the game state behind
+        self.draw_game(surface)
+        
+        # Add overlay
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        surface.blit(overlay, (0, 0))
+        
+        # Draw tutorial content
+        # (Add detailed tutorial instructions here)
+    
+    def handle_events(self):
+        """Handle all pygame events"""
+        mouse_pos = pygame.mouse.get_pos()
+        mouse_clicked = False
+        
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False  # Exit the game
+                
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:  # Left mouse button
+                    mouse_clicked = True
+                    
+            if event.type == pygame.KEYDOWN:
+                # Global key handling
+                if event.key == pygame.K_ESCAPE:
+                    # ESC key behavior depends on state
+                    if self.state == GameState.PLAYING:
+                        self.set_state(GameState.PAUSED)
+                    elif self.state == GameState.PAUSED:
+                        self.set_state(GameState.PLAYING)
+                    elif self.state in [GameState.SETTINGS, GameState.CREDITS, GameState.LEVEL_SELECT]:
+                        self.set_state(GameState.MAIN_MENU)
+                        
+                # State-specific key handling
+                if self.state == GameState.PLAYING:
+                    if event.key == self.settings["controls"]["pause"]:
+                        self.toggle_pause()
+                    elif event.key == self.settings["controls"]["reset"]:
+                        self.restart_level()
+                    elif event.key == pygame.K_g and self.gravity_field_active:
+                        # Toggle gravity field direction
+                        if self.gravity_field_strength == 0:
+                            self.gravity_field_strength = 0.2
+                            self.gravity_field_color = (148, 0, 211, 80)  # Purple (pull)
+                            play_sound("button_click", 0.5)
+                        elif self.gravity_field_strength > 0:
+                            self.gravity_field_strength = -0.2
+                            self.gravity_field_color = (0, 191, 255, 80)  # Blue (push)
+                            play_sound("button_click", 0.5)
+                        else:
+                            self.gravity_field_strength = 0
+                            play_sound("button_click", 0.3)
+                    elif event.key == pygame.K_space and self.level_num == 1:
+                        # Advance tutorial
+                        self.tutorial_step += 1
+                        play_sound("button_click", 0.5)
+        
+        # Handle button interactions for different states
+        if self.state == GameState.MAIN_MENU:
+            for button in self.menu_buttons["main"]:
+                if button.update(mouse_pos, mouse_clicked):
+                    button.action()
+                    
+        elif self.state == GameState.LEVEL_SELECT:
+            # Check level buttons
+            for button in self.level_select_buttons:
+                if button["unlocked"] and button["rect"].collidepoint(mouse_pos) and mouse_clicked:
+                    self.level_num = button["level"]
+                    self.set_state(GameState.PLAYING)
+                    play_sound("button_click")
+                    
+            # Check back button
+            for button in self.menu_buttons["level_select"]:
+                if button.update(mouse_pos, mouse_clicked):
+                    button.action()
+                    
+        elif self.state == GameState.PAUSED:
+            for button in self.menu_buttons["paused"]:
+                if button.update(mouse_pos, mouse_clicked):
+                    button.action()
+                    
+        elif self.state == GameState.LEVEL_COMPLETE:
+            for button in self.menu_buttons["level_complete"]:
+                if button.update(mouse_pos, mouse_clicked):
+                    button.action()
+                    
+        elif self.state == GameState.GAME_OVER:
+            for button in self.menu_buttons["game_over"]:
+                if button.update(mouse_pos, mouse_clicked):
+                    button.action()
+                    
+        elif self.state == GameState.SETTINGS:
+            # Update settings sliders
+            for slider in self.settings_sliders.values():
+                slider.update(mouse_pos, pygame.mouse.get_pressed())
+                
+            # Update toggle buttons
+            for button in self.settings_toggle_buttons:
+                if button.update(mouse_pos, mouse_clicked):
+                    button.action()
+                    
+            # Update back button
+            for button in self.menu_buttons["settings"]:
+                if button.update(mouse_pos, mouse_clicked):
+                    button.action()
+                    self.save_settings()
+                    
+        elif self.state == GameState.CREDITS:
+            for button in self.menu_buttons["settings"]:
+                if button.update(mouse_pos, mouse_clicked):
+                    button.action()
+        
+        return True  # Continue the game loop
+    
+    def run(self):
+        """Main game loop"""
+        running = True
+        
+        # Initialize game
+        self.set_state(GameState.MAIN_MENU)
+        play_music("menu")
+        
+        # For calculating delta time
+        prev_time = time.time()
+        
+        while running:
+            # Calculate delta time
+            current_time = time.time()
+            dt = current_time - prev_time
+            prev_time = current_time
+            
+            # Cap dt to prevent large jumps
+            dt = min(dt, 0.1)
+            
+            # Handle events
+            running = self.handle_events()
+            
+            # Handle keyboard input
+            if self.state == GameState.PLAYING:
+                self.handle_input(pygame.key.get_pressed())
+            
+            # Update game state
+            self.update(dt)
+            
+            # Draw the game
+            self.draw(screen)
+            
+            # Update the display
+            pygame.display.flip()
+            
+            # Cap the frame rate
+            clock.tick(FPS)
+            
+        # Save settings and high scores before quitting
+        self.save_settings()
+        self.save_highscores()
+        self.save_level_data()
+        
+        pygame.quit()
+        sys.exit()
+
     def update_settings(self, dt):
         """Update settings state"""
         # Apply settings changes
         if "music_volume" in self.settings_sliders:
-            self.settings["music_volume"] = self.settings_sliders["music_volume"].current_value
+            new_music_volume = self.settings_sliders["music_volume"].current_value
+            if self.settings["music_volume"] != new_music_volume:
+                self.settings["music_volume"] = new_music_volume
+                # Apply music volume change immediately
+                pygame.mixer.music.set_volume(new_music_volume)
             
         if "sound_volume" in self.settings_sliders:
             self.settings["sound_volume"] = self.settings_sliders["sound_volume"].current_value
@@ -3653,279 +3956,35 @@ class Game:
             overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, int(self.transition_alpha)))
             surface.blit(overlay, (0, 0))
-    
-    def draw_game(self, surface, shake_x=0, shake_y=0):
-        """Draw the game state"""
-        # Create a temporary surface for the game elements
-        game_surface = pygame.Surface((WIDTH, HEIGHT))
-        game_surface.fill((20, 30, 40))
-        
-        # Draw elements
-        self.draw_game_background(game_surface)
-        
-        # Draw gravity wells first (below other elements)
-        for well in self.gravity_wells:
-            well.draw(game_surface)
-            
-        # Draw surfaces
-        for s in self.surfaces:
-            s.draw(game_surface)
-            
-        # Draw teleporters
-        for teleporter in self.teleporters:
-            teleporter.draw(game_surface)
-            
-        # Draw bounce pads
-        for pad in self.bounce_pads:
-            pad.draw(game_surface)
-            
-        # Draw targets
-        for target in self.targets:
-            target.draw(game_surface)
-            
-        # Draw power-ups
-        for power_up in self.power_ups:
-            power_up.draw(game_surface)
-            
-        # Draw player gravity field if active
-        if self.gravity_field_active and self.gravity_field_strength != 0:
-            # Create a surface with per-pixel alpha
-            field_surf = pygame.Surface((self.gravity_field_radius*2, self.gravity_field_radius*2), pygame.SRCALPHA)
-            
-            # Determine color based on whether it's pulling or pushing
-            if self.gravity_field_strength > 0:
-                color = (148, 0, 211, 80)  # Purple for pull
-            else:
-                color = (0, 191, 255, 80)  # Blue for push
-                
-            # Draw the gravity field
-            pygame.draw.circle(field_surf, color, (self.gravity_field_radius, self.gravity_field_radius), self.gravity_field_radius)
-            
-            # Draw the surface onto the main surface
-            game_surface.blit(field_surf, (int(self.ball.x - self.gravity_field_radius), int(self.ball.y - self.gravity_field_radius)))
-            
-        # Draw magnet field if active
-        if self.magnet_active:
-            # Create a surface with per-pixel alpha
-            field_surf = pygame.Surface((self.magnet_radius*2, self.magnet_radius*2), pygame.SRCALPHA)
-            
-            # Draw pulsing magnet field
-            pulse = 0.7 + 0.3 * math.sin(pygame.time.get_ticks() * 0.003)
-            radius = int(self.magnet_radius * pulse)
-            color = (255, 165, 0, 40)  # Orange with low alpha
-            
-            # Draw the gradient field
-            for r in range(radius, 0, -3):
-                alpha = int(40 * (1 - r/radius))
-                pygame.draw.circle(field_surf, color[:3] + (alpha,), (self.magnet_radius, self.magnet_radius), r)
-                
-            # Draw the surface onto the main surface
-            game_surface.blit(field_surf, (int(self.ball.x - self.magnet_radius), int(self.ball.y - self.magnet_radius)))
-            
-        # Draw walls
-        for wall in self.walls:
-            wall.draw(game_surface)
-        
-        # Draw ball
-        self.ball.draw(game_surface)
-        
-        # Apply the shake offset when blitting to the main surface
-        surface.blit(game_surface, (shake_x, shake_y))
-        
-        # Draw UI (without shake effect)
-        self.draw_game_ui(surface)
-        
-        # Draw paused overlay if paused
-        if self.state == GameState.PAUSED:
-            # Semi-transparent overlay
-            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 128))
-            surface.blit(overlay, (0, 0))
-            
-            # Draw buttons
-            for button in self.menu_buttons["paused"]:
-                button.draw(surface)
-                
-            # Draw pause text
-            pause_text = title_font.render("PAUSED", True, WHITE)
-            text_rect = pause_text.get_rect(center=(WIDTH//2, HEIGHT//3))
-            surface.blit(pause_text, text_rect)
-            
-        # Draw tutorial if in early levels
-        if self.level_num == 1 and self.tutorial_step < len(self.tutorial_messages):
-            self.draw_tutorial_hint(surface)
-    
-    def draw_game_background(self, surface):
-        """Draw the game background with subtle grid pattern"""
-        # Draw subtle grid lines
-        grid_spacing = 50
-        grid_color = (40, 50, 60)
-        
-        for x in range(0, WIDTH, grid_spacing):
-            pygame.draw.line(surface, grid_color, (x, 0), (x, HEIGHT), 1)
-        for y in range(0, HEIGHT, grid_spacing):
-            pygame.draw.line(surface, grid_color, (0, y), (WIDTH, y), 1)
-            
-        # Draw subtle vignette effect
-        vignette = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        
-        # Create radial gradient for vignette
-        center_x, center_y = WIDTH // 2, HEIGHT // 2
-        max_radius = math.sqrt(center_x**2 + center_y**2)
-        
-        for x in range(0, WIDTH, 4):  # Skip pixels for performance
-            for y in range(0, HEIGHT, 4):
-                # Calculate distance from center
-                dx = x - center_x
-                dy = y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-                
-                # Calculate alpha based on distance (more transparent in center)
-                alpha = int(min(100, 100 * (distance / max_radius) ** 2))
-                
-                # Draw pixel with alpha
-                if alpha > 0:
-                    pygame.draw.rect(vignette, (0, 0, 0, alpha), (x, y, 4, 4))
-                    
-        # Apply vignette
-        surface.blit(vignette, (0, 0))
-    
-    def draw_game_ui(self, surface):
-        """Draw the game UI elements"""
-        # Draw energy bar
-        energy_width = 200
-        energy_height = 20
-        energy_x = 20
-        energy_y = 20
-        
-        # Energy bar background and border
-        pygame.draw.rect(surface, (50, 50, 50), (energy_x, energy_y, energy_width, energy_height))
-        pygame.draw.rect(surface, (100, 100, 100), (energy_x, energy_y, energy_width, energy_height), 1)
-        
-        # Energy bar fill
-        energy_percent = self.energy / ENERGY_MAX
-        fill_width = int(energy_width * energy_percent)
-        
-        # Energy bar color changes based on level
-        if energy_percent > 0.6:
-            energy_color = (100, 255, 100)  # Green
-        elif energy_percent > 0.3:
-            energy_color = (255, 255, 100)  # Yellow
-        else:
-            # Flashing red when low
-            if pygame.time.get_ticks() % 1000 < 500 and energy_percent < 0.15:
-                energy_color = (255, 50, 50)  # Bright red
-            else:
-                energy_color = (255, 100, 100)  # Normal red
-                
-        pygame.draw.rect(surface, energy_color, (energy_x, energy_y, fill_width, energy_height))
-        
-        # Energy text
-        energy_text = small_font.render(f"ENERGY: {int(self.energy)}/{ENERGY_MAX}", True, WHITE)
-        surface.blit(energy_text, (energy_x + energy_width + 10, energy_y))
-        
-        # Draw score and level info
-        info_x = WIDTH - 200
-        info_y = 20
-        spacing = 25
-        
-        score_text = medium_font.render(f"Score: {self.score}", True, WHITE)
-        level_text = medium_font.render(f"Level: {self.level_num}", True, WHITE)
-        
-        # Level time
-        minutes = int(self.level_time // 60)
-        seconds = int(self.level_time % 60)
-        time_text = medium_font.render(f"Time: {minutes:02d}:{seconds:02d}", True, WHITE)
-        
-        # Stars collected
-        stars_text = medium_font.render(f"Stars: {self.stars_collected}", True, YELLOW)
-        
-        # Draw info texts
-        surface.blit(score_text, (info_x, info_y))
-        surface.blit(level_text, (info_x, info_y + spacing))
-        surface.blit(time_text, (info_x, info_y + spacing * 2))
-        surface.blit(stars_text, (info_x, info_y + spacing * 3))
-        
-        # Draw active power-up indicators
-        if self.active_power_ups:
-            power_up_x = 20
-            power_up_y = 60
-            power_up_height = 25
-            
-            for power_up in self.active_power_ups:
-                if power_up.is_effect_active():
-                    remaining = power_up.get_remaining_time()
-                    
-                    # Draw background
-                    pygame.draw.rect(surface, (50, 50, 50, 150), 
-                                    (power_up_x, power_up_y, 150, power_up_height))
-                    
-                    # Draw icon
-                    pygame.draw.rect(surface, power_up.color, 
-                                   (power_up_x + 5, power_up_y + 5, 15, 15))
-                    
-                    # Draw text
-                    power_text = small_font.render(f"{power_up.type.capitalize()}: {remaining:.1f}s", 
-                                                 True, power_up.color)
-                    surface.blit(power_text, (power_up_x + 25, power_up_y + 2))
-                    
-                    # Draw progress bar
-                    bar_width = 100
-                    bar_height = 4
-                    remaining_pct = remaining / power_up.effect_duration
-                    
-                    pygame.draw.rect(surface, (100, 100, 100), 
-                                   (power_up_x + 25, power_up_y + 18, bar_width, bar_height))
-                    pygame.draw.rect(surface, power_up.color, 
-                                   (power_up_x + 25, power_up_y + 18, 
-                                    int(bar_width * remaining_pct), bar_height))
-                    
-                    power_up_y += power_up_height + 5
-        
-        # Draw controls help if specific power-ups are active
-        help_y = HEIGHT - 30
-        
-        if self.gravity_field_active:
-            gravity_help = small_font.render("Press G to toggle gravity field", True, (148, 0, 211))
-            surface.blit(gravity_help, (20, help_y))
-            help_y -= 25
-            
-        if self.time_dilated:
-            time_help = small_font.render("Time slowed", True, (255, 105, 180))
-            surface.blit(time_help, (20, help_y))
-            help_y -= 25
-            
-        # Show general controls in bottom right
-        controls_text = small_font.render("P: Pause | R: Restart | Arrow Keys: Move", True, (200, 200, 200))
-        surface.blit(controls_text, (WIDTH - controls_text.get_width() - 20, HEIGHT - 30))
-    
-    def draw_tutorial_hint(self, surface):
-        """Draw tutorial hint text for new players"""
-        if self.tutorial_step >= len(self.tutorial_messages):
-            return
-            
-        # Create semi-transparent background
-        hint_height = 80
-        hint_surf = pygame.Surface((WIDTH, hint_height), pygame.SRCALPHA)
-        hint_surf.fill((0, 0, 0, 180))
-        
-        # Draw hint text
-        hint_text = medium_font.render(self.tutorial_messages[self.tutorial_step], True, WHITE)
-        text_rect = hint_text.get_rect(center=(WIDTH//2, hint_height//2))
-        hint_surf.blit(hint_text, text_rect)
-        
-        # Draw continue prompt
-        continue_text = small_font.render("Press SPACE to continue", True, (200, 200, 200))
-        continue_rect = continue_text.get_rect(centerx=WIDTH//2, top=text_rect.bottom + 5)
-        hint_surf.blit(continue_text, continue_rect)
-        
-        # Show at bottom of screen
-        surface.blit(hint_surf, (0, HEIGHT - hint_height))
-    
+
     def draw_main_menu(self, surface):
         """Draw main menu state"""
         # Draw animated background
         self.draw_menu_background(surface)
+        
+        # Draw game title with glow effect
+        glow_size = 20
+        glow_color = (100, 200, 255, 30)
+        glow_surf = pygame.Surface((title_font.size("INERTIA")[0] + glow_size*2, 
+                                   title_font.size("INERTIA")[1] + glow_size*2), pygame.SRCALPHA)
+        
+        # Create pulsing glow
+        pulse_time = pygame.time.get_ticks() * 0.001
+        glow_alpha = int(math.sin(pulse_time * 2) * 20 + 30)
+        glow_color = (100, 200, 255, glow_alpha)
+        
+        # Draw multiple blurred circles for glow effect
+        for i in range(10):
+            size = glow_size * (1 - i/10)
+            alpha = glow_alpha * (1 - i/10)
+            temp_color = (glow_color[0], glow_color[1], glow_color[2], int(alpha))
+            pygame.draw.circle(glow_surf, temp_color, 
+                              (glow_surf.get_width()//2, glow_surf.get_height()//2), 
+                              glow_surf.get_width()//2 - i*2)
+        
+        # Position glow
+        glow_rect = glow_surf.get_rect(center=(WIDTH//2, HEIGHT//4))
+        surface.blit(glow_surf, (glow_rect.x - glow_size, glow_rect.y - glow_size))
         
         # Draw game title
         title_text = title_font.render("INERTIA", True, (100, 200, 255))
@@ -3946,13 +4005,27 @@ class Game:
         surface.blit(scaled_shadow, shadow_rect)
         surface.blit(scaled_title, title_rect)
         
-        # Draw subtitle
+        # Draw subtitle with a decorative underline
         subtitle_text = medium_font.render("DELUXE EDITION", True, (255, 255, 100))
         subtitle_rect = subtitle_text.get_rect(center=(WIDTH//2, title_rect.bottom + 20))
         surface.blit(subtitle_text, subtitle_rect)
         
-        # Draw menu buttons
-        for button in self.menu_buttons["main"]:
+        # Draw decorative underline
+        underline_width = subtitle_rect.width + 20
+        pygame.draw.line(surface, (255, 255, 100), 
+                        (WIDTH//2 - underline_width//2, subtitle_rect.bottom + 5),
+                        (WIDTH//2 + underline_width//2, subtitle_rect.bottom + 5), 2)
+        
+        # Draw menu panel background
+        panel_rect = pygame.Rect(WIDTH//2 - 150, subtitle_rect.bottom + 30, 300, 300)
+        pygame.draw.rect(surface, (30, 40, 60, 200), panel_rect, border_radius=15)
+        pygame.draw.rect(surface, (80, 120, 180), panel_rect, 2, border_radius=15)
+        
+        # Draw menu buttons with adjusted positions
+        for i, button in enumerate(self.menu_buttons["main"]):
+            # Adjust button position to be inside the panel
+            button.rect.x = panel_rect.left + 40
+            button.rect.y = panel_rect.top + 30 + i * 70
             button.draw(surface)
             
         # Draw version and credits
@@ -3962,11 +4035,36 @@ class Game:
         surface.blit(version_text, (20, HEIGHT - 50))
         surface.blit(credits_text, (20, HEIGHT - 25))
         
-        # Draw total stars collected
+        # Draw total stars collected with a star icon
         stars_text = medium_font.render(f"Total Stars: {self.total_stars}", True, YELLOW)
         stars_rect = stars_text.get_rect(topright=(WIDTH - 20, HEIGHT - 50))
+        
+        # Draw star icon
+        star_size = 20
+        star_x = stars_rect.left - star_size - 10
+        star_y = stars_rect.centery
+        
+        # Draw star with glow
+        star_glow = pygame.Surface((star_size*3, star_size*3), pygame.SRCALPHA)
+        pygame.draw.circle(star_glow, (255, 255, 0, 50), (star_size*3//2, star_size*3//2), star_size)
+        surface.blit(star_glow, (star_x - star_size, star_y - star_size))
+        
+        # Draw star
+        pygame.draw.polygon(surface, YELLOW, [
+            (star_x, star_y - star_size),
+            (star_x + star_size/4, star_y - star_size/2),
+            (star_x + star_size/2, star_y - star_size/2),
+            (star_x + star_size/4, star_y),
+            (star_x + star_size/2, star_y + star_size/2),
+            (star_x, star_y + star_size/4),
+            (star_x - star_size/2, star_y + star_size/2),
+            (star_x - star_size/4, star_y),
+            (star_x - star_size/2, star_y - star_size/2),
+            (star_x - star_size/4, star_y - star_size/2),
+        ])
+        
         surface.blit(stars_text, stars_rect)
-    
+
     def draw_menu_background(self, surface):
         """Draw animated background for menus"""
         # Draw subtle grid pattern
@@ -3998,108 +4096,326 @@ class Game:
             circle_surf = pygame.Surface((radius*2, radius*2), pygame.SRCALPHA)
             pygame.draw.circle(circle_surf, (100, 150, 255, alpha), (radius, radius), radius, 2)
             surface.blit(circle_surf, (int(x - radius), int(y - radius)))
-    
+
     def draw_level_select(self, surface):
         """Draw level select screen"""
         # Draw background
         self.draw_menu_background(surface)
         
-        # Draw title
+        # Draw title with an animated glow effect
         title_text = heading_font.render("SELECT LEVEL", True, WHITE)
         title_rect = title_text.get_rect(center=(WIDTH//2, 70))
+        
+        # Animated underline
+        pulse_time = pygame.time.get_ticks() * 0.001
+        
+        # Draw glow behind title
+        glow_size = 30
+        glow_surf = pygame.Surface((title_rect.width + glow_size*2, 
+                                  title_rect.height + glow_size*2), pygame.SRCALPHA)
+        
+        # Create pulsing glow
+        glow_alpha = int(math.sin(pulse_time * 2) * 20 + 30)
+        glow_color = (255, 255, 100, glow_alpha)
+        
+        # Draw multiple blurred circles for glow effect
+        for i in range(5):
+            size = glow_size * (1 - i/5)
+            alpha = glow_alpha * (1 - i/5)
+            temp_color = (glow_color[0], glow_color[1], glow_color[2], int(alpha))
+            pygame.draw.rect(glow_surf, temp_color, 
+                           (glow_size - i*2, glow_size - i*2, 
+                            title_rect.width + i*4, title_rect.height + i*4), 
+                           border_radius=10)
+        
+        # Position glow
+        surface.blit(glow_surf, (title_rect.x - glow_size, title_rect.y - glow_size))
+        
+        # Draw title with subtle shadow
+        shadow_offset = 3
+        title_shadow = heading_font.render("SELECT LEVEL", True, (30, 30, 30))
+        surface.blit(title_shadow, (title_rect.x + shadow_offset, title_rect.y + shadow_offset))
         surface.blit(title_text, title_rect)
         
-        # Draw stars information
+        # Draw decorative animated underline
+        underline_width = title_rect.width + 40
+        underline_y = title_rect.bottom + 5
+        # Draw glowing underline
+        pygame.draw.line(surface, YELLOW, 
+                        (WIDTH//2 - underline_width//2, underline_y),
+                        (WIDTH//2 + underline_width//2, underline_y), 3)
+        
+        # Add animated particles on the underline
+        particle_count = 3
+        for i in range(particle_count):
+            # Calculate position along the line based on time
+            offset = (pulse_time * 0.5 + i/particle_count) % 1.0
+            particle_x = WIDTH//2 - underline_width//2 + offset * underline_width
+            
+            # Draw glowing particle
+            particle_size = 6 + math.sin(pulse_time * 5) * 2
+            pygame.draw.circle(surface, (255, 255, 255, 200), 
+                              (int(particle_x), int(underline_y)), int(particle_size))
+        
+        # Draw stars information with an animated glowing effect
         stars_text = medium_font.render(f"Total Stars: {self.total_stars}", True, YELLOW)
-        stars_rect = stars_text.get_rect(centerx=WIDTH//2, top=title_rect.bottom + 10)
+        stars_rect = stars_text.get_rect(centerx=WIDTH//2, top=title_rect.bottom + 20)
+        
+        # Animated glow effect
+        glow_alpha = int(abs(math.sin(pulse_time * 2)) * 50 + 20)
+        
+        # Draw star icon next to text
+        star_size = 20
+        star_x = stars_rect.left - star_size - 10
+        star_y = stars_rect.centery
+        
+        # Draw star with glow
+        star_glow = pygame.Surface((star_size*3, star_size*3), pygame.SRCALPHA)
+        glow_radius = star_size + math.sin(pulse_time * 4) * 5
+        pygame.draw.circle(star_glow, (255, 255, 0, glow_alpha), 
+                          (star_size*3//2, star_size*3//2), int(glow_radius))
+        surface.blit(star_glow, (star_x - star_size, star_y - star_size))
+        
+        # Draw star
+        pygame.draw.polygon(surface, YELLOW, [
+            (star_x, star_y - star_size),
+            (star_x + star_size/4, star_y - star_size/2),
+            (star_x + star_size/2, star_y - star_size/2),
+            (star_x + star_size/4, star_y),
+            (star_x + star_size/2, star_y + star_size/2),
+            (star_x, star_y + star_size/4),
+            (star_x - star_size/2, star_y + star_size/2),
+            (star_x - star_size/4, star_y),
+            (star_x - star_size/2, star_y - star_size/2),
+            (star_x - star_size/4, star_y - star_size/2),
+        ])
+        
+        # Draw text with glow
+        glow_surf = pygame.Surface((stars_text.get_width() + 20, stars_text.get_height() + 20), pygame.SRCALPHA)
+        pygame.draw.rect(glow_surf, (255, 255, 0, glow_alpha), glow_surf.get_rect(), border_radius=10)
+        surface.blit(glow_surf, (stars_rect.left - 10, stars_rect.top - 10))
         surface.blit(stars_text, stars_rect)
         
-        # Draw level selection grid
-        mouse_pos = pygame.mouse.get_pos()
+        # Draw level selection grid with a stylish panel background
+        panel_rect = pygame.Rect(WIDTH//2 - 350, stars_rect.bottom + 20, 700, 400)
         
+        # Draw panel with gradient effect
+        gradient_surf = pygame.Surface((panel_rect.width, panel_rect.height), pygame.SRCALPHA)
+        for i in range(panel_rect.height):
+            alpha = 200 - i * 0.3
+            pygame.draw.line(gradient_surf, (30, 40, 50, alpha), 
+                           (0, i), (panel_rect.width, i))
+        surface.blit(gradient_surf, panel_rect)
+        
+        # Draw sleek border with rounded corners
+        pygame.draw.rect(surface, (80, 100, 120), panel_rect, 2, border_radius=15)
+        
+        # Subtle inner glow for panel
+        glow_surf = pygame.Surface((panel_rect.width, panel_rect.height), pygame.SRCALPHA)
+        for i in range(5):
+            pygame.draw.rect(glow_surf, (100, 150, 255, 10 - i*2), 
+                           (i, i, panel_rect.width - i*2, panel_rect.height - i*2), 
+                           border_radius=15)
+        surface.blit(glow_surf, panel_rect)
+        
+        # Get mouse position for hover effects
+        mouse_pos = pygame.mouse.get_pos()
+        current_time = pygame.time.get_ticks() * 0.001
+        
+        # Draw level buttons with improved animation
         for button in self.level_select_buttons:
             rect = button["rect"]
             level = button["level"]
             stars = button["stars"]
             unlocked = button["unlocked"]
             
-            # Check if mouse is hovering
+            # Check if mouse is hovering and update pulse
+            prev_hover = button["hover"]
             button["hover"] = rect.collidepoint(mouse_pos)
             
-            # Determine button color based on state
-            if not unlocked:
-                color = (80, 80, 80)  # Locked
-            elif button["hover"]:
-                color = (100, 200, 255)  # Hover
-            else:
-                color = (100, 150, 200)  # Normal
-                
-            # Draw button
-            pygame.draw.rect(surface, color, rect, border_radius=10)
-            pygame.draw.rect(surface, WHITE, rect, 2, border_radius=10)
+            # Start a new pulse when hover state changes
+            if button["hover"] and not prev_hover:
+                button["pulse"] = 0
             
-            # Draw level number
+            # Update pulse animation
+            if button["hover"]:
+                button["pulse"] = min(1.0, button["pulse"] + 0.05)
+            else:
+                button["pulse"] = max(0.0, button["pulse"] - 0.03)
+            
+            # Determine button colors and effects based on state
+            if not unlocked:
+                base_color = (60, 60, 70)  # Locked - darker
+                border_color = (100, 100, 100)  # Gray border
+                hover_color = (70, 70, 80)  # Slightly lighter on hover
+            else:
+                base_color = (80, 120, 180)  # Normal - blue
+                border_color = (150, 180, 220)  # Light blue border
+                hover_color = (100, 180, 255)  # Hover - brighter blue
+            
+            # Create color transition based on hover state
+            if button["pulse"] > 0:
+                # Interpolate between base and hover color
+                color = (
+                    int(base_color[0] + (hover_color[0] - base_color[0]) * button["pulse"]),
+                    int(base_color[1] + (hover_color[1] - base_color[1]) * button["pulse"]),
+                    int(base_color[2] + (hover_color[2] - base_color[2]) * button["pulse"])
+                )
+            else:
+                color = base_color
+            
+            # Draw button with 3D effect and improved animations
+            shadow_offset = 4
+            shadow_rect = rect.copy()
+            shadow_rect.y += shadow_offset
+            
+            # Draw shadow (darker for 3D effect)
+            pygame.draw.rect(surface, (20, 30, 40), shadow_rect, border_radius=10)
+            
+            # Draw main button with rounded corners
+            pygame.draw.rect(surface, color, rect, border_radius=10)
+            
+            # Draw animation effect on hover
+            if button["pulse"] > 0:
+                # Draw outer glow
+                glow_size = int(button["pulse"] * 20)
+                if glow_size > 0:
+                    glow_surf = pygame.Surface((rect.width + glow_size*2, rect.height + glow_size*2), pygame.SRCALPHA)
+                    glow_alpha = int(button["pulse"] * 100)
+                    pygame.draw.rect(glow_surf, hover_color + (glow_alpha,), 
+                                   (0, 0, rect.width + glow_size*2, rect.height + glow_size*2), 
+                                   border_radius=15)
+                    surface.blit(glow_surf, (rect.left - glow_size, rect.top - glow_size))
+                    
+                # Draw animated border
+                border_width = 2 + int(button["pulse"] * 2)
+                pygame.draw.rect(surface, (200, 230, 255), rect, border_width, border_radius=10)
+                
+                # Add subtle shine effect on top
+                shine_height = int(rect.height * 0.3)
+                shine_surf = pygame.Surface((rect.width, shine_height), pygame.SRCALPHA)
+                for i in range(shine_height):
+                    alpha = 100 - i * (100 / shine_height)
+                    pygame.draw.line(shine_surf, (255, 255, 255, int(alpha * button["pulse"])), 
+                                   (0, i), (rect.width, i))
+                
+                shine_rect = pygame.Rect(rect.left, rect.top, rect.width, shine_height)
+                surface.blit(shine_surf, shine_rect)
+            else:
+                # Normal border
+                pygame.draw.rect(surface, border_color, rect, 2, border_radius=10)
+            
+            # Draw level number with shadow effect for better readability
             level_text = medium_font.render(str(level), True, WHITE)
             level_rect = level_text.get_rect(center=rect.center)
+            
+            # Draw text shadow
+            shadow_text = medium_font.render(str(level), True, (20, 20, 20))
+            shadow_rect = shadow_text.get_rect(center=(level_rect.centerx + 2, level_rect.centery + 2))
+            surface.blit(shadow_text, shadow_rect)
             surface.blit(level_text, level_rect)
             
-            # Draw stars if unlocked
+            # Draw stars with improved visuals
             if unlocked:
                 star_size = 15
                 star_spacing = 20
-                start_x = rect.centerx - (star_spacing * 2) // 2
-                star_y = rect.bottom + 5
+                start_x = rect.centerx - (star_spacing * (3-1)) // 2
+                star_y = rect.bottom + 10
                 
                 for i in range(3):  # Max 3 stars per level
                     star_x = start_x + i * star_spacing
                     
+                    # Add subtle animation to stars based on time
+                    star_offset_y = math.sin(current_time * 2 + i * 0.5) * 2
+                    
                     if i < stars:
-                        # Filled star
+                        # Filled star with improved glow
+                        star_glow = pygame.Surface((star_size*2, star_size*2), pygame.SRCALPHA)
+                        glow_alpha = 50 + int(math.sin(current_time * 3 + i) * 20)
+                        pygame.draw.circle(star_glow, (255, 255, 0, glow_alpha), 
+                                         (star_size, star_size), star_size)
+                        surface.blit(star_glow, (star_x - star_size, star_y - star_size + star_offset_y))
+                        
+                        # Filled star with better shape
                         pygame.draw.polygon(surface, YELLOW, [
-                            (star_x, star_y - star_size),
-                            (star_x + star_size/4, star_y - star_size/2),
-                            (star_x + star_size/2, star_y - star_size/2),
-                            (star_x + star_size/4, star_y),
-                            (star_x + star_size/2, star_y + star_size/2),
-                            (star_x, star_y + star_size/4),
-                            (star_x - star_size/2, star_y + star_size/2),
-                            (star_x - star_size/4, star_y),
-                            (star_x - star_size/2, star_y - star_size/2),
-                            (star_x - star_size/4, star_y - star_size/2),
+                            (star_x, star_y - star_size + star_offset_y),
+                            (star_x + star_size/4, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/4, star_y + star_offset_y),
+                            (star_x + star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x, star_y + star_size/4 + star_offset_y),
+                            (star_x - star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y + star_offset_y),
+                            (star_x - star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y - star_size/2 + star_offset_y),
                         ])
                     else:
-                        # Empty star outline
-                        pygame.draw.polygon(surface, (100, 100, 100), [
-                            (star_x, star_y - star_size),
-                            (star_x + star_size/4, star_y - star_size/2),
-                            (star_x + star_size/2, star_y - star_size/2),
-                            (star_x + star_size/4, star_y),
-                            (star_x + star_size/2, star_y + star_size/2),
-                            (star_x, star_y + star_size/4),
-                            (star_x - star_size/2, star_y + star_size/2),
-                            (star_x - star_size/4, star_y),
-                            (star_x - star_size/2, star_y - star_size/2),
-                            (star_x - star_size/4, star_y - star_size/2),
-                        ], 1)
+                        # Empty star with better contrast
+                        empty_star_color = (100, 100, 120)
+                        pygame.draw.polygon(surface, empty_star_color, [
+                            (star_x, star_y - star_size + star_offset_y),
+                            (star_x + star_size/4, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/4, star_y + star_offset_y),
+                            (star_x + star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x, star_y + star_size/4 + star_offset_y),
+                            (star_x - star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y + star_offset_y),
+                            (star_x - star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y - star_size/2 + star_offset_y),
+                        ], 2)
             else:
-                # Show locked icon
-                lock_text = small_font.render("🔒", True, (150, 150, 150))
-                lock_rect = lock_text.get_rect(center=(rect.centerx, rect.bottom + 15))
-                surface.blit(lock_text, lock_rect)
+                # Improved lock icon for locked levels
+                lock_color = (180, 180, 180)
+                lock_size = 15
+                lock_x = rect.centerx
+                lock_y = rect.bottom + 15
+                
+                # Add subtle animation to lock
+                lock_float = math.sin(current_time * 2) * 2
+                
+                # Draw lock with shadow for depth
+                pygame.draw.rect(surface, (40, 40, 40), 
+                               (lock_x - lock_size//2 + 2, lock_y - lock_size//2 + 2 + lock_float, 
+                                lock_size, lock_size), 
+                               border_radius=3)
+                
+                # Draw lock body
+                pygame.draw.rect(surface, lock_color, 
+                               (lock_x - lock_size//2, lock_y - lock_size//2 + lock_float, 
+                                lock_size, lock_size), 
+                               border_radius=3)
+                
+                # Draw lock highlight for 3D effect
+                pygame.draw.line(surface, (220, 220, 220),
+                               (lock_x - lock_size//2 + 2, lock_y - lock_size//2 + 2 + lock_float),
+                               (lock_x - lock_size//2 + 2, lock_y + lock_size//2 - 2 + lock_float), 2)
+                
+                # Draw lock shackle with improved shape
+                pygame.draw.arc(surface, lock_color, 
+                              (lock_x - lock_size//2, lock_y - lock_size - lock_size//2 + lock_float, 
+                               lock_size, lock_size), 
+                              0, math.pi, 2)
+                
+                # Draw unlock requirement text with improved styling
+                if level > 1:  # Don't show for level 1
+                    stars_needed = level * REQUIRED_STARS_TO_UNLOCK
+                    req_text = tiny_font.render(f"Need {stars_needed} stars", True, (220, 220, 220))
+                    req_rect = req_text.get_rect(center=(rect.centerx, rect.bottom + 35 + lock_float))
+                    
+                    # Add subtle shadow for better readability
+                    shadow_text = tiny_font.render(f"Need {stars_needed} stars", True, (40, 40, 40))
+                    shadow_rect = shadow_text.get_rect(center=(req_rect.centerx + 1, req_rect.centery + 1))
+                    surface.blit(shadow_text, shadow_rect)
+                    surface.blit(req_text, req_rect)
         
-        # Draw back button
+        # Draw back button with improved styling
         for button in self.menu_buttons["level_select"]:
-            button.draw(surface)
-            
-        # Draw star requirements
-        required_stars = self.level_num * REQUIRED_STARS_TO_UNLOCK
-        if self.level_num < MAX_LEVELS:
-            req_text = small_font.render(
-                f"Collect {required_stars} total stars to unlock level {self.level_num + 1}", 
-                True, (200, 200, 200))
-            req_rect = req_text.get_rect(centerx=WIDTH//2, bottom=HEIGHT - 60)
-            surface.blit(req_text, req_rect)
-    
+            # Update button style to match the new sleek design
+            button.color = (0, 100, 200)  
+            button.hover_color = (50, 150, 255)
+            button.draw(surface, glow=True)  # Assuming you have a glow parameter for the button class
+
     def draw_level_complete(self, surface):
         """Draw level complete screen"""
         # First draw the game state behind
@@ -4246,9 +4562,619 @@ class Game:
             if time_since_complete > 2.5:
                 for button in self.menu_buttons["level_complete"]:
                     button.draw(surface)
+
+    def draw_game(self, surface, shake_offset_x=0, shake_offset_y=0):
+        """Draw the game state with all gameplay elements"""
+        # Draw background grid
+        grid_size = 50
+        grid_color = (40, 50, 60)
+        
+        for x in range(0, WIDTH, grid_size):
+            pygame.draw.line(surface, grid_color, 
+                           (x + shake_offset_x, 0 + shake_offset_y), 
+                           (x + shake_offset_x, HEIGHT + shake_offset_y), 1)
+        for y in range(0, HEIGHT, grid_size):
+            pygame.draw.line(surface, grid_color, 
+                           (0 + shake_offset_x, y + shake_offset_y), 
+                           (WIDTH + shake_offset_x, y + shake_offset_y), 1)
+        
+        # Draw level elements
+        for wall in self.walls:
+            wall.draw(surface, shake_offset_x, shake_offset_y)
+            
+        # Draw player
+        self.ball.draw(surface, shake_offset_x, shake_offset_y)
+        
+        # Draw collectibles
+        for star in self.stars:
+            if not star.collected:
+                star.draw(surface, shake_offset_x, shake_offset_y)
+                
+        # Draw enemies
+        for enemy in self.enemies:
+            enemy.draw(surface, shake_offset_x, shake_offset_y)
+            
+        # Draw exit portal if level is complete
+        if self.exit_portal_active:
+            self.exit_portal.draw(surface, shake_offset_x, shake_offset_y)
+            
+        # Draw UI elements
+        self.draw_hud(surface)
+        
+        # Draw any active effects
+        if self.gravity_field_active:
+            # Draw semi-transparent gravity field
+            field_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            field_surf.fill(self.gravity_field_color)
+            surface.blit(field_surf, (0, 0))
+            
+            # Draw gravity direction indicator
+            if self.gravity_field_strength != 0:
+                center_x, center_y = WIDTH // 2, HEIGHT // 2
+                indicator_length = 50
+                
+                if self.gravity_field_strength > 0:  # Pull
+                    start_x, start_y = center_x - indicator_length, center_y
+                    end_x, end_y = center_x + indicator_length, center_y
+                else:  # Push
+                    start_x, start_y = center_x + indicator_length, center_y
+                    end_x, end_y = center_x - indicator_length, center_y
+                    
+                pygame.draw.line(surface, WHITE, (start_x, start_y), (end_x, end_y), 3)
+                
+                # Draw arrowhead
+                arrow_size = 10
+                if self.gravity_field_strength > 0:  # Pull
+                    pygame.draw.polygon(surface, WHITE, [
+                        (end_x, end_y),
+                        (end_x - arrow_size, end_y - arrow_size // 2),
+                        (end_x - arrow_size, end_y + arrow_size // 2)
+                    ])
+                else:  # Push
+                    pygame.draw.polygon(surface, WHITE, [
+                        (end_x, end_y),
+                        (end_x + arrow_size, end_y - arrow_size // 2),
+                        (end_x + arrow_size, end_y + arrow_size // 2)
+                    ])
+        
+        # Draw tutorial tips if first level
+        if self.level_num == 1 and self.tutorial_step > 0:
+            self.draw_tutorial_tips(surface)
     
-    def draw_game_over(self, surface):
-        """Draw game over screen"""
+    def draw_hud(self, surface):
+        """Draw heads-up display elements"""
+        # Draw level indicator
+        level_text = medium_font.render(f"Level {self.level_num}", True, WHITE)
+        surface.blit(level_text, (20, 20))
+        
+        # Draw score
+        score_text = medium_font.render(f"Score: {self.score}", True, WHITE)
+        surface.blit(score_text, (20, 60))
+        
+        # Draw stars collected
+        stars_text = medium_font.render(f"Stars: {self.stars_collected}/3", True, YELLOW)
+        surface.blit(stars_text, (20, 100))
+        
+        # Draw timer
+        minutes = int(self.level_time // 60)
+        seconds = int(self.level_time % 60)
+        timer_text = medium_font.render(f"Time: {minutes:02d}:{seconds:02d}", True, WHITE)
+        surface.blit(timer_text, (WIDTH - timer_text.get_width() - 20, 20))
+        
+        # Draw energy bar if applicable
+        if hasattr(self, 'energy'):
+            # Background
+            pygame.draw.rect(surface, (60, 60, 60), (WIDTH - 220, 60, 200, 20))
+            
+            # Energy level
+            energy_percent = self.energy / 100.0  # Assuming max energy is 100
+            energy_width = int(200 * energy_percent)
+            
+            # Change color based on energy level
+            if energy_percent > 0.6:
+                energy_color = GREEN
+            elif energy_percent > 0.3:
+                energy_color = YELLOW
+            else:
+                energy_color = RED
+                
+            pygame.draw.rect(surface, energy_color, (WIDTH - 220, 60, energy_width, 20))
+            
+            # Border
+            pygame.draw.rect(surface, WHITE, (WIDTH - 220, 60, 200, 20), 2)
+            
+            # Label
+            energy_label = small_font.render("ENERGY", True, WHITE)
+            surface.blit(energy_label, (WIDTH - 220, 40))
+    
+    def draw_tutorial_tips(self, surface):
+        """Draw tutorial tips for the first level"""
+        if self.tutorial_step == 1:
+            tip_text = ["Use arrow keys to move", "Press SPACE to continue"]
+        elif self.tutorial_step == 2:
+            tip_text = ["Collect stars to increase your score", "Press SPACE to continue"]
+        elif self.tutorial_step == 3:
+            tip_text = ["Complete the level quickly for better time stars", "Press SPACE to continue"]
+        elif self.tutorial_step == 4:
+            tip_text = ["Press G to toggle gravity fields when available", "Press SPACE to continue"]
+        elif self.tutorial_step == 5:
+            tip_text = ["Press P to pause the game", "Press R to restart the level", "Good luck!"]
+        else:
+            return
+            
+        # Draw background panel
+        tip_height = len(tip_text) * 30 + 40
+        panel_rect = pygame.Rect(WIDTH//2 - 250, HEIGHT - tip_height - 20, 500, tip_height)
+        pygame.draw.rect(surface, (0, 0, 0, 180), panel_rect, border_radius=10)
+        pygame.draw.rect(surface, WHITE, panel_rect, 2, border_radius=10)
+        
+        # Draw tip text
+        for i, line in enumerate(tip_text):
+            tip_surf = medium_font.render(line, True, WHITE)
+            tip_rect = tip_surf.get_rect(center=(WIDTH//2, panel_rect.top + 30 + i * 30))
+            surface.blit(tip_surf, tip_rect)
+
+    def draw_main_menu(self, surface):
+        """Draw main menu state"""
+        # Draw animated background
+        self.draw_menu_background(surface)
+        
+        # Draw game title with glow effect
+        glow_size = 20
+        glow_color = (100, 200, 255, 30)
+        glow_surf = pygame.Surface((title_font.size("INERTIA")[0] + glow_size*2, 
+                                   title_font.size("INERTIA")[1] + glow_size*2), pygame.SRCALPHA)
+        
+        # Create pulsing glow
+        pulse_time = pygame.time.get_ticks() * 0.001
+        glow_alpha = int(math.sin(pulse_time * 2) * 20 + 30)
+        glow_color = (100, 200, 255, glow_alpha)
+        
+        # Draw multiple blurred circles for glow effect
+        for i in range(10):
+            size = glow_size * (1 - i/10)
+            alpha = glow_alpha * (1 - i/10)
+            temp_color = (glow_color[0], glow_color[1], glow_color[2], int(alpha))
+            pygame.draw.circle(glow_surf, temp_color, 
+                              (glow_surf.get_width()//2, glow_surf.get_height()//2), 
+                              glow_surf.get_width()//2 - i*2)
+        
+        # Position glow
+        glow_rect = glow_surf.get_rect(center=(WIDTH//2, HEIGHT//4))
+        surface.blit(glow_surf, (glow_rect.x - glow_size, glow_rect.y - glow_size))
+        
+        # Draw game title
+        title_text = title_font.render("INERTIA", True, (100, 200, 255))
+        title_shadow = title_font.render("INERTIA", True, (50, 100, 150))
+        
+        # Add pulsing effect to title
+        pulse = math.sin(pygame.time.get_ticks() * 0.002) * 0.1 + 1
+        title_width = int(title_text.get_width() * pulse)
+        title_height = int(title_text.get_height() * pulse)
+        
+        scaled_title = pygame.transform.scale(title_text, (title_width, title_height))
+        scaled_shadow = pygame.transform.scale(title_shadow, (title_width, title_height))
+        
+        title_rect = scaled_title.get_rect(center=(WIDTH//2, HEIGHT//4))
+        shadow_rect = scaled_shadow.get_rect(center=(WIDTH//2 + 5, HEIGHT//4 + 5))
+        
+        # Draw shadow first, then title
+        surface.blit(scaled_shadow, shadow_rect)
+        surface.blit(scaled_title, title_rect)
+        
+        # Draw subtitle with a decorative underline
+        subtitle_text = medium_font.render("DELUXE EDITION", True, (255, 255, 100))
+        subtitle_rect = subtitle_text.get_rect(center=(WIDTH//2, title_rect.bottom + 20))
+        surface.blit(subtitle_text, subtitle_rect)
+        
+        # Draw decorative underline
+        underline_width = subtitle_rect.width + 20
+        pygame.draw.line(surface, (255, 255, 100), 
+                        (WIDTH//2 - underline_width//2, subtitle_rect.bottom + 5),
+                        (WIDTH//2 + underline_width//2, subtitle_rect.bottom + 5), 2)
+        
+        # Draw menu panel background
+        panel_rect = pygame.Rect(WIDTH//2 - 150, subtitle_rect.bottom + 30, 300, 300)
+        pygame.draw.rect(surface, (30, 40, 60, 200), panel_rect, border_radius=15)
+        pygame.draw.rect(surface, (80, 120, 180), panel_rect, 2, border_radius=15)
+        
+        # Draw menu buttons with adjusted positions
+        for i, button in enumerate(self.menu_buttons["main"]):
+            # Adjust button position to be inside the panel
+            button.rect.x = panel_rect.left + 40
+            button.rect.y = panel_rect.top + 30 + i * 70
+            button.draw(surface)
+            
+        # Draw version and credits
+        version_text = small_font.render("Version 1.0", True, (150, 150, 150))
+        credits_text = small_font.render("Created by PyGameLegends", True, (150, 150, 150))
+        
+        surface.blit(version_text, (20, HEIGHT - 50))
+        surface.blit(credits_text, (20, HEIGHT - 25))
+        
+        # Draw total stars collected with a star icon
+        stars_text = medium_font.render(f"Total Stars: {self.total_stars}", True, YELLOW)
+        stars_rect = stars_text.get_rect(topright=(WIDTH - 20, HEIGHT - 50))
+        
+        # Draw star icon
+        star_size = 20
+        star_x = stars_rect.left - star_size - 10
+        star_y = stars_rect.centery
+        
+        # Draw star with glow
+        star_glow = pygame.Surface((star_size*3, star_size*3), pygame.SRCALPHA)
+        pygame.draw.circle(star_glow, (255, 255, 0, 50), (star_size*3//2, star_size*3//2), star_size)
+        surface.blit(star_glow, (star_x - star_size, star_y - star_size))
+        
+        # Draw star
+        pygame.draw.polygon(surface, YELLOW, [
+            (star_x, star_y - star_size),
+            (star_x + star_size/4, star_y - star_size/2),
+            (star_x + star_size/2, star_y - star_size/2),
+            (star_x + star_size/4, star_y),
+            (star_x + star_size/2, star_y + star_size/2),
+            (star_x, star_y + star_size/4),
+            (star_x - star_size/2, star_y + star_size/2),
+            (star_x - star_size/4, star_y),
+            (star_x - star_size/2, star_y - star_size/2),
+            (star_x - star_size/4, star_y - star_size/2),
+        ])
+        
+        surface.blit(stars_text, stars_rect)
+
+    def draw_menu_background(self, surface):
+        """Draw animated background for menus"""
+        # Draw subtle grid pattern
+        grid_size = 50
+        grid_color = (40, 50, 70)
+        
+        # Animate grid based on time
+        offset_x = int(pygame.time.get_ticks() * 0.02) % grid_size
+        offset_y = int(pygame.time.get_ticks() * 0.01) % grid_size
+        
+        for x in range(-offset_x, WIDTH, grid_size):
+            pygame.draw.line(surface, grid_color, (x, 0), (x, HEIGHT), 1)
+        for y in range(-offset_y, HEIGHT, grid_size):
+            pygame.draw.line(surface, grid_color, (0, y), (WIDTH, y), 1)
+            
+        # Draw circular patterns
+        time_val = pygame.time.get_ticks() * 0.001
+        for i in range(3):
+            radius = 150 + i * 100
+            alpha = int(50 - i * 10)
+            speed = 0.2 - i * 0.05
+            
+            # Calculate position based on time
+            angle = time_val * speed
+            x = WIDTH // 2 + math.cos(angle) * 50
+            y = HEIGHT // 2 + math.sin(angle) * 50
+            
+            # Draw circle with alpha
+            circle_surf = pygame.Surface((radius*2, radius*2), pygame.SRCALPHA)
+            pygame.draw.circle(circle_surf, (100, 150, 255, alpha), (radius, radius), radius, 2)
+            surface.blit(circle_surf, (int(x - radius), int(y - radius)))
+
+    def draw_level_select(self, surface):
+        """Draw level select screen"""
+        # Draw background
+        self.draw_menu_background(surface)
+        
+        # Draw title with an animated glow effect
+        title_text = heading_font.render("SELECT LEVEL", True, WHITE)
+        title_rect = title_text.get_rect(center=(WIDTH//2, 70))
+        
+        # Animated underline
+        pulse_time = pygame.time.get_ticks() * 0.001
+        
+        # Draw glow behind title
+        glow_size = 30
+        glow_surf = pygame.Surface((title_rect.width + glow_size*2, 
+                                  title_rect.height + glow_size*2), pygame.SRCALPHA)
+        
+        # Create pulsing glow
+        glow_alpha = int(math.sin(pulse_time * 2) * 20 + 30)
+        glow_color = (255, 255, 100, glow_alpha)
+        
+        # Draw multiple blurred circles for glow effect
+        for i in range(5):
+            size = glow_size * (1 - i/5)
+            alpha = glow_alpha * (1 - i/5)
+            temp_color = (glow_color[0], glow_color[1], glow_color[2], int(alpha))
+            pygame.draw.rect(glow_surf, temp_color, 
+                           (glow_size - i*2, glow_size - i*2, 
+                            title_rect.width + i*4, title_rect.height + i*4), 
+                           border_radius=10)
+        
+        # Position glow
+        surface.blit(glow_surf, (title_rect.x - glow_size, title_rect.y - glow_size))
+        
+        # Draw title with subtle shadow
+        shadow_offset = 3
+        title_shadow = heading_font.render("SELECT LEVEL", True, (30, 30, 30))
+        surface.blit(title_shadow, (title_rect.x + shadow_offset, title_rect.y + shadow_offset))
+        surface.blit(title_text, title_rect)
+        
+        # Draw decorative animated underline
+        underline_width = title_rect.width + 40
+        underline_y = title_rect.bottom + 5
+        # Draw glowing underline
+        pygame.draw.line(surface, YELLOW, 
+                        (WIDTH//2 - underline_width//2, underline_y),
+                        (WIDTH//2 + underline_width//2, underline_y), 3)
+        
+        # Add animated particles on the underline
+        particle_count = 3
+        for i in range(particle_count):
+            # Calculate position along the line based on time
+            offset = (pulse_time * 0.5 + i/particle_count) % 1.0
+            particle_x = WIDTH//2 - underline_width//2 + offset * underline_width
+            
+            # Draw glowing particle
+            particle_size = 6 + math.sin(pulse_time * 5) * 2
+            pygame.draw.circle(surface, (255, 255, 255, 200), 
+                              (int(particle_x), int(underline_y)), int(particle_size))
+        
+        # Draw stars information with an animated glowing effect
+        stars_text = medium_font.render(f"Total Stars: {self.total_stars}", True, YELLOW)
+        stars_rect = stars_text.get_rect(centerx=WIDTH//2, top=title_rect.bottom + 20)
+        
+        # Animated glow effect
+        glow_alpha = int(abs(math.sin(pulse_time * 2)) * 50 + 20)
+        
+        # Draw star icon next to text
+        star_size = 20
+        star_x = stars_rect.left - star_size - 10
+        star_y = stars_rect.centery
+        
+        # Draw star with glow
+        star_glow = pygame.Surface((star_size*3, star_size*3), pygame.SRCALPHA)
+        glow_radius = star_size + math.sin(pulse_time * 4) * 5
+        pygame.draw.circle(star_glow, (255, 255, 0, glow_alpha), 
+                          (star_size*3//2, star_size*3//2), int(glow_radius))
+        surface.blit(star_glow, (star_x - star_size, star_y - star_size))
+        
+        # Draw star
+        pygame.draw.polygon(surface, YELLOW, [
+            (star_x, star_y - star_size),
+            (star_x + star_size/4, star_y - star_size/2),
+            (star_x + star_size/2, star_y - star_size/2),
+            (star_x + star_size/4, star_y),
+            (star_x + star_size/2, star_y + star_size/2),
+            (star_x, star_y + star_size/4),
+            (star_x - star_size/2, star_y + star_size/2),
+            (star_x - star_size/4, star_y),
+            (star_x - star_size/2, star_y - star_size/2),
+            (star_x - star_size/4, star_y - star_size/2),
+        ])
+        
+        # Draw text with glow
+        glow_surf = pygame.Surface((stars_text.get_width() + 20, stars_text.get_height() + 20), pygame.SRCALPHA)
+        pygame.draw.rect(glow_surf, (255, 255, 0, glow_alpha), glow_surf.get_rect(), border_radius=10)
+        surface.blit(glow_surf, (stars_rect.left - 10, stars_rect.top - 10))
+        surface.blit(stars_text, stars_rect)
+        
+        # Draw level selection grid with a stylish panel background
+        panel_rect = pygame.Rect(WIDTH//2 - 350, stars_rect.bottom + 20, 700, 400)
+        
+        # Draw panel with gradient effect
+        gradient_surf = pygame.Surface((panel_rect.width, panel_rect.height), pygame.SRCALPHA)
+        for i in range(panel_rect.height):
+            alpha = 200 - i * 0.3
+            pygame.draw.line(gradient_surf, (30, 40, 50, alpha), 
+                           (0, i), (panel_rect.width, i))
+        surface.blit(gradient_surf, panel_rect)
+        
+        # Draw sleek border with rounded corners
+        pygame.draw.rect(surface, (80, 100, 120), panel_rect, 2, border_radius=15)
+        
+        # Subtle inner glow for panel
+        glow_surf = pygame.Surface((panel_rect.width, panel_rect.height), pygame.SRCALPHA)
+        for i in range(5):
+            pygame.draw.rect(glow_surf, (100, 150, 255, 10 - i*2), 
+                           (i, i, panel_rect.width - i*2, panel_rect.height - i*2), 
+                           border_radius=15)
+        surface.blit(glow_surf, panel_rect)
+        
+        # Get mouse position for hover effects
+        mouse_pos = pygame.mouse.get_pos()
+        current_time = pygame.time.get_ticks() * 0.001
+        
+        # Draw level buttons with improved animation
+        for button in self.level_select_buttons:
+            rect = button["rect"]
+            level = button["level"]
+            stars = button["stars"]
+            unlocked = button["unlocked"]
+            
+            # Check if mouse is hovering and update pulse
+            prev_hover = button["hover"]
+            button["hover"] = rect.collidepoint(mouse_pos)
+            
+            # Start a new pulse when hover state changes
+            if button["hover"] and not prev_hover:
+                button["pulse"] = 0
+            
+            # Update pulse animation
+            if button["hover"]:
+                button["pulse"] = min(1.0, button["pulse"] + 0.05)
+            else:
+                button["pulse"] = max(0.0, button["pulse"] - 0.03)
+            
+            # Determine button colors and effects based on state
+            if not unlocked:
+                base_color = (60, 60, 70)  # Locked - darker
+                border_color = (100, 100, 100)  # Gray border
+                hover_color = (70, 70, 80)  # Slightly lighter on hover
+            else:
+                base_color = (80, 120, 180)  # Normal - blue
+                border_color = (150, 180, 220)  # Light blue border
+                hover_color = (100, 180, 255)  # Hover - brighter blue
+            
+            # Create color transition based on hover state
+            if button["pulse"] > 0:
+                # Interpolate between base and hover color
+                color = (
+                    int(base_color[0] + (hover_color[0] - base_color[0]) * button["pulse"]),
+                    int(base_color[1] + (hover_color[1] - base_color[1]) * button["pulse"]),
+                    int(base_color[2] + (hover_color[2] - base_color[2]) * button["pulse"])
+                )
+            else:
+                color = base_color
+            
+            # Draw button with 3D effect and improved animations
+            shadow_offset = 4
+            shadow_rect = rect.copy()
+            shadow_rect.y += shadow_offset
+            
+            # Draw shadow (darker for 3D effect)
+            pygame.draw.rect(surface, (20, 30, 40), shadow_rect, border_radius=10)
+            
+            # Draw main button with rounded corners
+            pygame.draw.rect(surface, color, rect, border_radius=10)
+            
+            # Draw animation effect on hover
+            if button["pulse"] > 0:
+                # Draw outer glow
+                glow_size = int(button["pulse"] * 20)
+                if glow_size > 0:
+                    glow_surf = pygame.Surface((rect.width + glow_size*2, rect.height + glow_size*2), pygame.SRCALPHA)
+                    glow_alpha = int(button["pulse"] * 100)
+                    pygame.draw.rect(glow_surf, hover_color + (glow_alpha,), 
+                                   (0, 0, rect.width + glow_size*2, rect.height + glow_size*2), 
+                                   border_radius=15)
+                    surface.blit(glow_surf, (rect.left - glow_size, rect.top - glow_size))
+                    
+                # Draw animated border
+                border_width = 2 + int(button["pulse"] * 2)
+                pygame.draw.rect(surface, (200, 230, 255), rect, border_width, border_radius=10)
+                
+                # Add subtle shine effect on top
+                shine_height = int(rect.height * 0.3)
+                shine_surf = pygame.Surface((rect.width, shine_height), pygame.SRCALPHA)
+                for i in range(shine_height):
+                    alpha = 100 - i * (100 / shine_height)
+                    pygame.draw.line(shine_surf, (255, 255, 255, int(alpha * button["pulse"])), 
+                                   (0, i), (rect.width, i))
+                
+                shine_rect = pygame.Rect(rect.left, rect.top, rect.width, shine_height)
+                surface.blit(shine_surf, shine_rect)
+            else:
+                # Normal border
+                pygame.draw.rect(surface, border_color, rect, 2, border_radius=10)
+            
+            # Draw level number with shadow effect for better readability
+            level_text = medium_font.render(str(level), True, WHITE)
+            level_rect = level_text.get_rect(center=rect.center)
+            
+            # Draw text shadow
+            shadow_text = medium_font.render(str(level), True, (20, 20, 20))
+            shadow_rect = shadow_text.get_rect(center=(level_rect.centerx + 2, level_rect.centery + 2))
+            surface.blit(shadow_text, shadow_rect)
+            surface.blit(level_text, level_rect)
+            
+            # Draw stars with improved visuals
+            if unlocked:
+                star_size = 15
+                star_spacing = 20
+                start_x = rect.centerx - (star_spacing * (3-1)) // 2
+                star_y = rect.bottom + 10
+                
+                for i in range(3):  # Max 3 stars per level
+                    star_x = start_x + i * star_spacing
+                    
+                    # Add subtle animation to stars based on time
+                    star_offset_y = math.sin(current_time * 2 + i * 0.5) * 2
+                    
+                    if i < stars:
+                        # Filled star with improved glow
+                        star_glow = pygame.Surface((star_size*2, star_size*2), pygame.SRCALPHA)
+                        glow_alpha = 50 + int(math.sin(current_time * 3 + i) * 20)
+                        pygame.draw.circle(star_glow, (255, 255, 0, glow_alpha), 
+                                         (star_size, star_size), star_size)
+                        surface.blit(star_glow, (star_x - star_size, star_y - star_size + star_offset_y))
+                        
+                        # Filled star with better shape
+                        pygame.draw.polygon(surface, YELLOW, [
+                            (star_x, star_y - star_size + star_offset_y),
+                            (star_x + star_size/4, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/4, star_y + star_offset_y),
+                            (star_x + star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x, star_y + star_size/4 + star_offset_y),
+                            (star_x - star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y + star_offset_y),
+                            (star_x - star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y - star_size/2 + star_offset_y),
+                        ])
+                    else:
+                        # Empty star with better contrast
+                        empty_star_color = (100, 100, 120)
+                        pygame.draw.polygon(surface, empty_star_color, [
+                            (star_x, star_y - star_size + star_offset_y),
+                            (star_x + star_size/4, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/4, star_y + star_offset_y),
+                            (star_x + star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x, star_y + star_size/4 + star_offset_y),
+                            (star_x - star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y + star_offset_y),
+                            (star_x - star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y - star_size/2 + star_offset_y),
+                        ], 2)
+            else:
+                # Improved lock icon for locked levels
+                lock_color = (180, 180, 180)
+                lock_size = 15
+                lock_x = rect.centerx
+                lock_y = rect.bottom + 15
+                
+                # Add subtle animation to lock
+                lock_float = math.sin(current_time * 2) * 2
+                
+                # Draw lock with shadow for depth
+                pygame.draw.rect(surface, (40, 40, 40), 
+                               (lock_x - lock_size//2 + 2, lock_y - lock_size//2 + 2 + lock_float, 
+                                lock_size, lock_size), 
+                               border_radius=3)
+                
+                # Draw lock body
+                pygame.draw.rect(surface, lock_color, 
+                               (lock_x - lock_size//2, lock_y - lock_size//2 + lock_float, 
+                                lock_size, lock_size), 
+                               border_radius=3)
+                
+                # Draw lock highlight for 3D effect
+                pygame.draw.line(surface, (220, 220, 220),
+                               (lock_x - lock_size//2 + 2, lock_y - lock_size//2 + 2 + lock_float),
+                               (lock_x - lock_size//2 + 2, lock_y + lock_size//2 - 2 + lock_float), 2)
+                
+                # Draw lock shackle with improved shape
+                pygame.draw.arc(surface, lock_color, 
+                              (lock_x - lock_size//2, lock_y - lock_size - lock_size//2 + lock_float, 
+                               lock_size, lock_size), 
+                              0, math.pi, 2)
+                
+                # Draw unlock requirement text with improved styling
+                if level > 1:  # Don't show for level 1
+                    stars_needed = level * REQUIRED_STARS_TO_UNLOCK
+                    req_text = tiny_font.render(f"Need {stars_needed} stars", True, (220, 220, 220))
+                    req_rect = req_text.get_rect(center=(rect.centerx, rect.bottom + 35 + lock_float))
+                    
+                    # Add subtle shadow for better readability
+                    shadow_text = tiny_font.render(f"Need {stars_needed} stars", True, (40, 40, 40))
+                    shadow_rect = shadow_text.get_rect(center=(req_rect.centerx + 1, req_rect.centery + 1))
+                    surface.blit(shadow_text, shadow_rect)
+                    surface.blit(req_text, req_rect)
+        
+        # Draw back button with improved styling
+        for button in self.menu_buttons["level_select"]:
+            # Update button style to match the new sleek design
+            button.color = (0, 100, 200)  
+            button.hover_color = (50, 150, 255)
+            button.draw(surface, glow=True)  # Assuming you have a glow parameter for the button class
+
+    def draw_level_complete(self, surface):
+        """Draw level complete screen"""
         # First draw the game state behind
         self.draw_game(surface)
         
@@ -4257,250 +5183,891 @@ class Game:
         overlay.fill((0, 0, 0, 180))
         surface.blit(overlay, (0, 0))
         
-        # Draw game over text
-        game_over_text = heading_font.render("GAME OVER", True, RED)
-        game_over_rect = game_over_text.get_rect(center=(WIDTH//2, HEIGHT//3))
-        surface.blit(game_over_text, game_over_rect)
+        # Draw level complete text with animation
+        complete_text = heading_font.render("LEVEL COMPLETE!", True, WHITE)
         
-        # Draw reason text
-        if self.game_over_reason:
-            reason_text = medium_font.render(self.game_over_reason, True, WHITE)
-            reason_rect = reason_text.get_rect(center=(WIDTH//2, game_over_rect.bottom + 30))
-            surface.blit(reason_text, reason_rect)
+        # Animate text entry
+        time_since_complete = time.time() - self.level_complete_time
+        if time_since_complete < 0.5:
+            # Slide in from top
+            progress = time_since_complete / 0.5
+            text_y = -complete_text.get_height() + progress * (HEIGHT // 3 + complete_text.get_height())
+        else:
+            text_y = HEIGHT // 3
             
-        # Draw buttons
-        for button in self.menu_buttons["game_over"]:
-            button.draw(surface)
-    
-    def draw_settings(self, surface):
-        """Draw settings screen"""
-        # Draw background
-        self.draw_menu_background(surface)
+        complete_rect = complete_text.get_rect(centerx=WIDTH//2, top=text_y)
+        surface.blit(complete_text, complete_rect)
         
-        # Draw title
-        title_text = heading_font.render("SETTINGS", True, WHITE)
-        title_rect = title_text.get_rect(center=(WIDTH//2, 70))
-        surface.blit(title_text, title_rect)
-        
-        # Draw sliders
-        for slider in self.settings_sliders.values():
-            slider.draw(surface)
+        # Draw stats with animation
+        if time_since_complete > 0.7:
+            stats_y = complete_rect.bottom + 50
+            spacing = 40
             
-        # Draw toggle buttons
-        for button in self.settings_toggle_buttons:
-            button.draw(surface)
+            # Time
+            minutes = int(self.level_time // 60)
+            seconds = int(self.level_time % 60)
+            time_text = medium_font.render(f"Time: {minutes:02d}:{seconds:02d}", True, WHITE)
+            time_rect = time_text.get_rect(centerx=WIDTH//2, top=stats_y)
+            surface.blit(time_text, time_rect)
             
-        # Draw back button
-        for button in self.menu_buttons["settings"]:
-            button.draw(surface)
-    
-    def draw_credits(self, surface):
-        """Draw credits screen"""
-        # Draw background
-        self.draw_menu_background(surface)
-        
-        # Draw title
-        title_text = heading_font.render("CREDITS", True, WHITE)
-        title_rect = title_text.get_rect(center=(WIDTH//2, 70))
-        surface.blit(title_text, title_rect)
-        
-        # Draw credits content
-        credits = [
-            "Inertia: Deluxe Edition",
-            "",
-            "A game by PyGameLegends",
-            "",
-            "Programming: The Python Team",
-            "Art & Design: Creative Studios",
-            "Sound Effects: Audio Masters",
-            "Music: Melodic Minds",
-            "",
-            "Made with PyGame",
-            "",
-            "Thanks for playing!"
-        ]
-        
-        y = 150
-        for line in credits:
-            if line:
-                text = medium_font.render(line, True, WHITE)
-            else:
-                text = medium_font.render(" ", True, WHITE)  # Empty line
+            # Score
+            score_text = medium_font.render(f"Score: {self.score}", True, WHITE)
+            score_rect = score_text.get_rect(centerx=WIDTH//2, top=stats_y + spacing)
+            surface.blit(score_text, score_rect)
+            
+            # Stars collected
+            stars_text = medium_font.render(f"Stars Collected: {self.level_complete_stars}/3", True, YELLOW)
+            stars_rect = stars_text.get_rect(centerx=WIDTH//2, top=stats_y + spacing * 2)
+            surface.blit(stars_text, stars_rect)
+            
+            # Draw stars with animation
+            if time_since_complete > 1.0:
+                star_size = 40
+                star_spacing = 60
+                start_x = WIDTH//2 - star_spacing
+                star_y = stars_rect.bottom + 30
                 
-            text_rect = text.get_rect(center=(WIDTH//2, y))
-            surface.blit(text, text_rect)
-            y += 30
+                for i in range(3):  # Max 3 stars per level
+                    star_x = start_x + i * star_spacing
+                    star_time = 1.0 + i * 0.5  # Stagger star animations
+                    
+                    if time_since_complete > star_time:
+                        # Calculate animation progress
+                        star_progress = min(1.0, (time_since_complete - star_time) / 0.5)
+                        
+                        # Scale and fade in
+                        current_size = star_size * star_progress
+                        alpha = int(255 * star_progress)
+                        
+                        if i < self.level_complete_stars:
+                            # Play star sound once for each star
+                            if star_progress < 0.1 and i == 0:
+                                play_sound("star", 0.8)
+                            elif star_progress < 0.1 and i == 1:
+                                play_sound("star", 0.8)
+                            elif star_progress < 0.1 and i == 2:
+                                play_sound("star", 0.8)
+                                
+                            # Filled star with animation
+                            star_surf = pygame.Surface((star_size*2, star_size*2), pygame.SRCALPHA)
+                            
+                            # Draw star polygon
+                            pygame.draw.polygon(star_surf, YELLOW + (alpha,), [
+                                (star_size, 0),
+                                (star_size + star_size/4, star_size - star_size/2),
+                                (star_size*2, star_size - star_size/2),
+                                (star_size + star_size/2, star_size),
+                                (star_size*2, star_size*2),
+                                (star_size, star_size + star_size/2),
+                                (0, star_size*2),
+                                (star_size - star_size/2, star_size),
+                                (0, star_size - star_size/2),
+                                (star_size - star_size/4, star_size - star_size/2),
+                            ])
+                            
+                            # Scale to animation size
+                            if current_size < star_size:
+                                scale_factor = current_size / star_size
+                                scaled_star = pygame.transform.scale(
+                                    star_surf, 
+                                    (int(star_surf.get_width() * scale_factor), 
+                                     int(star_surf.get_height() * scale_factor))
+                                )
+                                star_rect = scaled_star.get_rect(center=(star_x, star_y))
+                                surface.blit(scaled_star, star_rect)
+                            else:
+                                # Add pulsing effect when fully shown
+                                pulse = 1 + 0.2 * math.sin((time_since_complete - star_time) * 5)
+                                pulse_size = int(star_size * 2 * pulse)
+                                scaled_star = pygame.transform.scale(
+                                    star_surf, 
+                                    (pulse_size, pulse_size)
+                                )
+                                star_rect = scaled_star.get_rect(center=(star_x, star_y))
+                                surface.blit(scaled_star, star_rect)
+                        else:
+                            # Empty star
+                            star_surf = pygame.Surface((star_size*2, star_size*2), pygame.SRCALPHA)
+                            pygame.draw.polygon(star_surf, (100, 100, 100, alpha), [
+                                (star_size, 0),
+                                (star_size + star_size/4, star_size - star_size/2),
+                                (star_size*2, star_size - star_size/2),
+                                (star_size + star_size/2, star_size),
+                                (star_size*2, star_size*2),
+                                (star_size, star_size + star_size/2),
+                                (0, star_size*2),
+                                (star_size - star_size/2, star_size),
+                                (0, star_size - star_size/2),
+                                (star_size - star_size/4, star_size - star_size/2),
+                            ], 2)
+                            
+                            # Scale to animation size
+                            if current_size < star_size:
+                                scale_factor = current_size / star_size
+                                scaled_star = pygame.transform.scale(
+                                    star_surf, 
+                                    (int(star_surf.get_width() * scale_factor), 
+                                     int(star_surf.get_height() * scale_factor))
+                                )
+                                star_rect = scaled_star.get_rect(center=(star_x, star_y))
+                                surface.blit(scaled_star, star_rect)
+                            else:
+                                star_rect = star_surf.get_rect(center=(star_x, star_y))
+                                surface.blit(star_surf, star_rect)
+                                
+            # Draw buttons
+            if time_since_complete > 2.5:
+                for button in self.menu_buttons["level_complete"]:
+                    button.draw(surface)
+
+    def draw_game(self, surface, shake_offset_x=0, shake_offset_y=0):
+        """Draw the game state with all gameplay elements"""
+        # Draw background grid
+        grid_size = 50
+        grid_color = (40, 50, 60)
+        
+        for x in range(0, WIDTH, grid_size):
+            pygame.draw.line(surface, grid_color, 
+                           (x + shake_offset_x, 0 + shake_offset_y), 
+                           (x + shake_offset_x, HEIGHT + shake_offset_y), 1)
+        for y in range(0, HEIGHT, grid_size):
+            pygame.draw.line(surface, grid_color, 
+                           (0 + shake_offset_x, y + shake_offset_y), 
+                           (WIDTH + shake_offset_x, y + shake_offset_y), 1)
+        
+        # Draw level elements
+        for wall in self.walls:
+            wall.draw(surface, shake_offset_x, shake_offset_y)
             
-        # Draw back button
-        for button in self.menu_buttons["settings"]:
-            button.draw(surface)
+        # Draw player
+        self.ball.draw(surface, shake_offset_x, shake_offset_y)
+        
+        # Draw collectibles
+        for star in self.stars:
+            if not star.collected:
+                star.draw(surface, shake_offset_x, shake_offset_y)
+                
+        # Draw enemies
+        for enemy in self.enemies:
+            enemy.draw(surface, shake_offset_x, shake_offset_y)
+            
+        # Draw exit portal if level is complete
+        if self.exit_portal_active:
+            self.exit_portal.draw(surface, shake_offset_x, shake_offset_y)
+            
+        # Draw UI elements
+        self.draw_hud(surface)
+        
+        # Draw any active effects
+        if self.gravity_field_active:
+            # Draw semi-transparent gravity field
+            field_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            field_surf.fill(self.gravity_field_color)
+            surface.blit(field_surf, (0, 0))
+            
+            # Draw gravity direction indicator
+            if self.gravity_field_strength != 0:
+                center_x, center_y = WIDTH // 2, HEIGHT // 2
+                indicator_length = 50
+                
+                if self.gravity_field_strength > 0:  # Pull
+                    start_x, start_y = center_x - indicator_length, center_y
+                    end_x, end_y = center_x + indicator_length, center_y
+                else:  # Push
+                    start_x, start_y = center_x + indicator_length, center_y
+                    end_x, end_y = center_x - indicator_length, center_y
+                    
+                pygame.draw.line(surface, WHITE, (start_x, start_y), (end_x, end_y), 3)
+                
+                # Draw arrowhead
+                arrow_size = 10
+                if self.gravity_field_strength > 0:  # Pull
+                    pygame.draw.polygon(surface, WHITE, [
+                        (end_x, end_y),
+                        (end_x - arrow_size, end_y - arrow_size // 2),
+                        (end_x - arrow_size, end_y + arrow_size // 2)
+                    ])
+                else:  # Push
+                    pygame.draw.polygon(surface, WHITE, [
+                        (end_x, end_y),
+                        (end_x + arrow_size, end_y - arrow_size // 2),
+                        (end_x + arrow_size, end_y + arrow_size // 2)
+                    ])
+        
+        # Draw tutorial tips if first level
+        if self.level_num == 1 and self.tutorial_step > 0:
+            self.draw_tutorial_tips(surface)
     
-    def draw_tutorial(self, surface):
-        """Draw tutorial screen"""
+    def draw_hud(self, surface):
+        """Draw heads-up display elements"""
+        # Draw level indicator
+        level_text = medium_font.render(f"Level {self.level_num}", True, WHITE)
+        surface.blit(level_text, (20, 20))
+        
+        # Draw score
+        score_text = medium_font.render(f"Score: {self.score}", True, WHITE)
+        surface.blit(score_text, (20, 60))
+        
+        # Draw stars collected
+        stars_text = medium_font.render(f"Stars: {self.stars_collected}/3", True, YELLOW)
+        surface.blit(stars_text, (20, 100))
+        
+        # Draw timer
+        minutes = int(self.level_time // 60)
+        seconds = int(self.level_time % 60)
+        timer_text = medium_font.render(f"Time: {minutes:02d}:{seconds:02d}", True, WHITE)
+        surface.blit(timer_text, (WIDTH - timer_text.get_width() - 20, 20))
+        
+        # Draw energy bar if applicable
+        if hasattr(self, 'energy'):
+            # Background
+            pygame.draw.rect(surface, (60, 60, 60), (WIDTH - 220, 60, 200, 20))
+            
+            # Energy level
+            energy_percent = self.energy / 100.0  # Assuming max energy is 100
+            energy_width = int(200 * energy_percent)
+            
+            # Change color based on energy level
+            if energy_percent > 0.6:
+                energy_color = GREEN
+            elif energy_percent > 0.3:
+                energy_color = YELLOW
+            else:
+                energy_color = RED
+                
+            pygame.draw.rect(surface, energy_color, (WIDTH - 220, 60, energy_width, 20))
+            
+            # Border
+            pygame.draw.rect(surface, WHITE, (WIDTH - 220, 60, 200, 20), 2)
+            
+            # Label
+            energy_label = small_font.render("ENERGY", True, WHITE)
+            surface.blit(energy_label, (WIDTH - 220, 40))
+    
+    def draw_tutorial_tips(self, surface):
+        """Draw tutorial tips for the first level"""
+        if self.tutorial_step == 1:
+            tip_text = ["Use arrow keys to move", "Press SPACE to continue"]
+        elif self.tutorial_step == 2:
+            tip_text = ["Collect stars to increase your score", "Press SPACE to continue"]
+        elif self.tutorial_step == 3:
+            tip_text = ["Complete the level quickly for better time stars", "Press SPACE to continue"]
+        elif self.tutorial_step == 4:
+            tip_text = ["Press G to toggle gravity fields when available", "Press SPACE to continue"]
+        elif self.tutorial_step == 5:
+            tip_text = ["Press P to pause the game", "Press R to restart the level", "Good luck!"]
+        else:
+            return
+            
+        # Draw background panel
+        tip_height = len(tip_text) * 30 + 40
+        panel_rect = pygame.Rect(WIDTH//2 - 250, HEIGHT - tip_height - 20, 500, tip_height)
+        pygame.draw.rect(surface, (0, 0, 0, 180), panel_rect, border_radius=10)
+        pygame.draw.rect(surface, WHITE, panel_rect, 2, border_radius=10)
+        
+        # Draw tip text
+        for i, line in enumerate(tip_text):
+            tip_surf = medium_font.render(line, True, WHITE)
+            tip_rect = tip_surf.get_rect(center=(WIDTH//2, panel_rect.top + 30 + i * 30))
+            surface.blit(tip_surf, tip_rect)
+
+    def draw_main_menu(self, surface):
+        """Draw main menu state"""
+        # Draw animated background
+        self.draw_menu_background(surface)
+        
+        # Draw game title with glow effect
+        glow_size = 20
+        glow_color = (100, 200, 255, 30)
+        glow_surf = pygame.Surface((title_font.size("INERTIA")[0] + glow_size*2, 
+                                   title_font.size("INERTIA")[1] + glow_size*2), pygame.SRCALPHA)
+        
+        # Create pulsing glow
+        pulse_time = pygame.time.get_ticks() * 0.001
+        glow_alpha = int(math.sin(pulse_time * 2) * 20 + 30)
+        glow_color = (100, 200, 255, glow_alpha)
+        
+        # Draw multiple blurred circles for glow effect
+        for i in range(10):
+            size = glow_size * (1 - i/10)
+            alpha = glow_alpha * (1 - i/10)
+            temp_color = (glow_color[0], glow_color[1], glow_color[2], int(alpha))
+            pygame.draw.circle(glow_surf, temp_color, 
+                              (glow_surf.get_width()//2, glow_surf.get_height()//2), 
+                              glow_surf.get_width()//2 - i*2)
+        
+        # Position glow
+        glow_rect = glow_surf.get_rect(center=(WIDTH//2, HEIGHT//4))
+        surface.blit(glow_surf, (glow_rect.x - glow_size, glow_rect.y - glow_size))
+        
+        # Draw game title
+        title_text = title_font.render("INERTIA", True, (100, 200, 255))
+        title_shadow = title_font.render("INERTIA", True, (50, 100, 150))
+        
+        # Add pulsing effect to title
+        pulse = math.sin(pygame.time.get_ticks() * 0.002) * 0.1 + 1
+        title_width = int(title_text.get_width() * pulse)
+        title_height = int(title_text.get_height() * pulse)
+        
+        scaled_title = pygame.transform.scale(title_text, (title_width, title_height))
+        scaled_shadow = pygame.transform.scale(title_shadow, (title_width, title_height))
+        
+        title_rect = scaled_title.get_rect(center=(WIDTH//2, HEIGHT//4))
+        shadow_rect = scaled_shadow.get_rect(center=(WIDTH//2 + 5, HEIGHT//4 + 5))
+        
+        # Draw shadow first, then title
+        surface.blit(scaled_shadow, shadow_rect)
+        surface.blit(scaled_title, title_rect)
+        
+        # Draw subtitle with a decorative underline
+        subtitle_text = medium_font.render("DELUXE EDITION", True, (255, 255, 100))
+        subtitle_rect = subtitle_text.get_rect(center=(WIDTH//2, title_rect.bottom + 20))
+        surface.blit(subtitle_text, subtitle_rect)
+        
+        # Draw decorative underline
+        underline_width = subtitle_rect.width + 20
+        pygame.draw.line(surface, (255, 255, 100), 
+                        (WIDTH//2 - underline_width//2, subtitle_rect.bottom + 5),
+                        (WIDTH//2 + underline_width//2, subtitle_rect.bottom + 5), 2)
+        
+        # Draw menu panel background
+        panel_rect = pygame.Rect(WIDTH//2 - 150, subtitle_rect.bottom + 30, 300, 300)
+        pygame.draw.rect(surface, (30, 40, 60, 200), panel_rect, border_radius=15)
+        pygame.draw.rect(surface, (80, 120, 180), panel_rect, 2, border_radius=15)
+        
+        # Draw menu buttons with adjusted positions
+        for i, button in enumerate(self.menu_buttons["main"]):
+            # Adjust button position to be inside the panel
+            button.rect.x = panel_rect.left + 40
+            button.rect.y = panel_rect.top + 30 + i * 70
+            button.draw(surface)
+            
+        # Draw version and credits
+        version_text = small_font.render("Version 1.0", True, (150, 150, 150))
+        credits_text = small_font.render("Created by PyGameLegends", True, (150, 150, 150))
+        
+        surface.blit(version_text, (20, HEIGHT - 50))
+        surface.blit(credits_text, (20, HEIGHT - 25))
+        
+        # Draw total stars collected with a star icon
+        stars_text = medium_font.render(f"Total Stars: {self.total_stars}", True, YELLOW)
+        stars_rect = stars_text.get_rect(topright=(WIDTH - 20, HEIGHT - 50))
+        
+        # Draw star icon
+        star_size = 20
+        star_x = stars_rect.left - star_size - 10
+        star_y = stars_rect.centery
+        
+        # Draw star with glow
+        star_glow = pygame.Surface((star_size*3, star_size*3), pygame.SRCALPHA)
+        pygame.draw.circle(star_glow, (255, 255, 0, 50), (star_size*3//2, star_size*3//2), star_size)
+        surface.blit(star_glow, (star_x - star_size, star_y - star_size))
+        
+        # Draw star
+        pygame.draw.polygon(surface, YELLOW, [
+            (star_x, star_y - star_size),
+            (star_x + star_size/4, star_y - star_size/2),
+            (star_x + star_size/2, star_y - star_size/2),
+            (star_x + star_size/4, star_y),
+            (star_x + star_size/2, star_y + star_size/2),
+            (star_x, star_y + star_size/4),
+            (star_x - star_size/2, star_y + star_size/2),
+            (star_x - star_size/4, star_y),
+            (star_x - star_size/2, star_y - star_size/2),
+            (star_x - star_size/4, star_y - star_size/2),
+        ])
+        
+        surface.blit(stars_text, stars_rect)
+
+    def draw_menu_background(self, surface):
+        """Draw animated background for menus"""
+        # Draw subtle grid pattern
+        grid_size = 50
+        grid_color = (40, 50, 70)
+        
+        # Animate grid based on time
+        offset_x = int(pygame.time.get_ticks() * 0.02) % grid_size
+        offset_y = int(pygame.time.get_ticks() * 0.01) % grid_size
+        
+        for x in range(-offset_x, WIDTH, grid_size):
+            pygame.draw.line(surface, grid_color, (x, 0), (x, HEIGHT), 1)
+        for y in range(-offset_y, HEIGHT, grid_size):
+            pygame.draw.line(surface, grid_color, (0, y), (WIDTH, y), 1)
+            
+        # Draw circular patterns
+        time_val = pygame.time.get_ticks() * 0.001
+        for i in range(3):
+            radius = 150 + i * 100
+            alpha = int(50 - i * 10)
+            speed = 0.2 - i * 0.05
+            
+            # Calculate position based on time
+            angle = time_val * speed
+            x = WIDTH // 2 + math.cos(angle) * 50
+            y = HEIGHT // 2 + math.sin(angle) * 50
+            
+            # Draw circle with alpha
+            circle_surf = pygame.Surface((radius*2, radius*2), pygame.SRCALPHA)
+            pygame.draw.circle(circle_surf, (100, 150, 255, alpha), (radius, radius), radius, 2)
+            surface.blit(circle_surf, (int(x - radius), int(y - radius)))
+
+    def draw_level_select(self, surface):
+        """Draw level select screen"""
+        # Draw background
+        self.draw_menu_background(surface)
+        
+        # Draw title with an animated glow effect
+        title_text = heading_font.render("SELECT LEVEL", True, WHITE)
+        title_rect = title_text.get_rect(center=(WIDTH//2, 70))
+        
+        # Animated underline
+        pulse_time = pygame.time.get_ticks() * 0.001
+        
+        # Draw glow behind title
+        glow_size = 30
+        glow_surf = pygame.Surface((title_rect.width + glow_size*2, 
+                                  title_rect.height + glow_size*2), pygame.SRCALPHA)
+        
+        # Create pulsing glow
+        glow_alpha = int(math.sin(pulse_time * 2) * 20 + 30)
+        glow_color = (255, 255, 100, glow_alpha)
+        
+        # Draw multiple blurred circles for glow effect
+        for i in range(5):
+            size = glow_size * (1 - i/5)
+            alpha = glow_alpha * (1 - i/5)
+            temp_color = (glow_color[0], glow_color[1], glow_color[2], int(alpha))
+            pygame.draw.rect(glow_surf, temp_color, 
+                           (glow_size - i*2, glow_size - i*2, 
+                            title_rect.width + i*4, title_rect.height + i*4), 
+                           border_radius=10)
+        
+        # Position glow
+        surface.blit(glow_surf, (title_rect.x - glow_size, title_rect.y - glow_size))
+        
+        # Draw title with subtle shadow
+        shadow_offset = 3
+        title_shadow = heading_font.render("SELECT LEVEL", True, (30, 30, 30))
+        surface.blit(title_shadow, (title_rect.x + shadow_offset, title_rect.y + shadow_offset))
+        surface.blit(title_text, title_rect)
+        
+        # Draw decorative animated underline
+        underline_width = title_rect.width + 40
+        underline_y = title_rect.bottom + 5
+        # Draw glowing underline
+        pygame.draw.line(surface, YELLOW, 
+                        (WIDTH//2 - underline_width//2, underline_y),
+                        (WIDTH//2 + underline_width//2, underline_y), 3)
+        
+        # Add animated particles on the underline
+        particle_count = 3
+        for i in range(particle_count):
+            # Calculate position along the line based on time
+            offset = (pulse_time * 0.5 + i/particle_count) % 1.0
+            particle_x = WIDTH//2 - underline_width//2 + offset * underline_width
+            
+            # Draw glowing particle
+            particle_size = 6 + math.sin(pulse_time * 5) * 2
+            pygame.draw.circle(surface, (255, 255, 255, 200), 
+                              (int(particle_x), int(underline_y)), int(particle_size))
+        
+        # Draw stars information with an animated glowing effect
+        stars_text = medium_font.render(f"Total Stars: {self.total_stars}", True, YELLOW)
+        stars_rect = stars_text.get_rect(centerx=WIDTH//2, top=title_rect.bottom + 20)
+        
+        # Animated glow effect
+        glow_alpha = int(abs(math.sin(pulse_time * 2)) * 50 + 20)
+        
+        # Draw star icon next to text
+        star_size = 20
+        star_x = stars_rect.left - star_size - 10
+        star_y = stars_rect.centery
+        
+        # Draw star with glow
+        star_glow = pygame.Surface((star_size*3, star_size*3), pygame.SRCALPHA)
+        glow_radius = star_size + math.sin(pulse_time * 4) * 5
+        pygame.draw.circle(star_glow, (255, 255, 0, glow_alpha), 
+                          (star_size*3//2, star_size*3//2), int(glow_radius))
+        surface.blit(star_glow, (star_x - star_size, star_y - star_size))
+        
+        # Draw star
+        pygame.draw.polygon(surface, YELLOW, [
+            (star_x, star_y - star_size),
+            (star_x + star_size/4, star_y - star_size/2),
+            (star_x + star_size/2, star_y - star_size/2),
+            (star_x + star_size/4, star_y),
+            (star_x + star_size/2, star_y + star_size/2),
+            (star_x, star_y + star_size/4),
+            (star_x - star_size/2, star_y + star_size/2),
+            (star_x - star_size/4, star_y),
+            (star_x - star_size/2, star_y - star_size/2),
+            (star_x - star_size/4, star_y - star_size/2),
+        ])
+        
+        # Draw text with glow
+        glow_surf = pygame.Surface((stars_text.get_width() + 20, stars_text.get_height() + 20), pygame.SRCALPHA)
+        pygame.draw.rect(glow_surf, (255, 255, 0, glow_alpha), glow_surf.get_rect(), border_radius=10)
+        surface.blit(glow_surf, (stars_rect.left - 10, stars_rect.top - 10))
+        surface.blit(stars_text, stars_rect)
+        
+        # Draw level selection grid with a stylish panel background
+        panel_rect = pygame.Rect(WIDTH//2 - 350, stars_rect.bottom + 20, 700, 400)
+        
+        # Draw panel with gradient effect
+        gradient_surf = pygame.Surface((panel_rect.width, panel_rect.height), pygame.SRCALPHA)
+        for i in range(panel_rect.height):
+            alpha = 200 - i * 0.3
+            pygame.draw.line(gradient_surf, (30, 40, 50, alpha), 
+                           (0, i), (panel_rect.width, i))
+        surface.blit(gradient_surf, panel_rect)
+        
+        # Draw sleek border with rounded corners
+        pygame.draw.rect(surface, (80, 100, 120), panel_rect, 2, border_radius=15)
+        
+        # Subtle inner glow for panel
+        glow_surf = pygame.Surface((panel_rect.width, panel_rect.height), pygame.SRCALPHA)
+        for i in range(5):
+            pygame.draw.rect(glow_surf, (100, 150, 255, 10 - i*2), 
+                           (i, i, panel_rect.width - i*2, panel_rect.height - i*2), 
+                           border_radius=15)
+        surface.blit(glow_surf, panel_rect)
+        
+        # Get mouse position for hover effects
+        mouse_pos = pygame.mouse.get_pos()
+        current_time = pygame.time.get_ticks() * 0.001
+        
+        # Draw level buttons with improved animation
+        for button in self.level_select_buttons:
+            rect = button["rect"]
+            level = button["level"]
+            stars = button["stars"]
+            unlocked = button["unlocked"]
+            
+            # Check if mouse is hovering and update pulse
+            prev_hover = button["hover"]
+            button["hover"] = rect.collidepoint(mouse_pos)
+            
+            # Start a new pulse when hover state changes
+            if button["hover"] and not prev_hover:
+                button["pulse"] = 0
+            
+            # Update pulse animation
+            if button["hover"]:
+                button["pulse"] = min(1.0, button["pulse"] + 0.05)
+            else:
+                button["pulse"] = max(0.0, button["pulse"] - 0.03)
+            
+            # Determine button colors and effects based on state
+            if not unlocked:
+                base_color = (60, 60, 70)  # Locked - darker
+                border_color = (100, 100, 100)  # Gray border
+                hover_color = (70, 70, 80)  # Slightly lighter on hover
+            else:
+                base_color = (80, 120, 180)  # Normal - blue
+                border_color = (150, 180, 220)  # Light blue border
+                hover_color = (100, 180, 255)  # Hover - brighter blue
+            
+            # Create color transition based on hover state
+            if button["pulse"] > 0:
+                # Interpolate between base and hover color
+                color = (
+                    int(base_color[0] + (hover_color[0] - base_color[0]) * button["pulse"]),
+                    int(base_color[1] + (hover_color[1] - base_color[1]) * button["pulse"]),
+                    int(base_color[2] + (hover_color[2] - base_color[2]) * button["pulse"])
+                )
+            else:
+                color = base_color
+            
+            # Draw button with 3D effect and improved animations
+            shadow_offset = 4
+            shadow_rect = rect.copy()
+            shadow_rect.y += shadow_offset
+            
+            # Draw shadow (darker for 3D effect)
+            pygame.draw.rect(surface, (20, 30, 40), shadow_rect, border_radius=10)
+            
+            # Draw main button with rounded corners
+            pygame.draw.rect(surface, color, rect, border_radius=10)
+            
+            # Draw animation effect on hover
+            if button["pulse"] > 0:
+                # Draw outer glow
+                glow_size = int(button["pulse"] * 20)
+                if glow_size > 0:
+                    glow_surf = pygame.Surface((rect.width + glow_size*2, rect.height + glow_size*2), pygame.SRCALPHA)
+                    glow_alpha = int(button["pulse"] * 100)
+                    pygame.draw.rect(glow_surf, hover_color + (glow_alpha,), 
+                                   (0, 0, rect.width + glow_size*2, rect.height + glow_size*2), 
+                                   border_radius=15)
+                    surface.blit(glow_surf, (rect.left - glow_size, rect.top - glow_size))
+                    
+                # Draw animated border
+                border_width = 2 + int(button["pulse"] * 2)
+                pygame.draw.rect(surface, (200, 230, 255), rect, border_width, border_radius=10)
+                
+                # Add subtle shine effect on top
+                shine_height = int(rect.height * 0.3)
+                shine_surf = pygame.Surface((rect.width, shine_height), pygame.SRCALPHA)
+                for i in range(shine_height):
+                    alpha = 100 - i * (100 / shine_height)
+                    pygame.draw.line(shine_surf, (255, 255, 255, int(alpha * button["pulse"])), 
+                                   (0, i), (rect.width, i))
+                
+                shine_rect = pygame.Rect(rect.left, rect.top, rect.width, shine_height)
+                surface.blit(shine_surf, shine_rect)
+            else:
+                # Normal border
+                pygame.draw.rect(surface, border_color, rect, 2, border_radius=10)
+            
+            # Draw level number with shadow effect for better readability
+            level_text = medium_font.render(str(level), True, WHITE)
+            level_rect = level_text.get_rect(center=rect.center)
+            
+            # Draw text shadow
+            shadow_text = medium_font.render(str(level), True, (20, 20, 20))
+            shadow_rect = shadow_text.get_rect(center=(level_rect.centerx + 2, level_rect.centery + 2))
+            surface.blit(shadow_text, shadow_rect)
+            surface.blit(level_text, level_rect)
+            
+            # Draw stars with improved visuals
+            if unlocked:
+                star_size = 15
+                star_spacing = 20
+                start_x = rect.centerx - (star_spacing * (3-1)) // 2
+                star_y = rect.bottom + 10
+                
+                for i in range(3):  # Max 3 stars per level
+                    star_x = start_x + i * star_spacing
+                    
+                    # Add subtle animation to stars based on time
+                    star_offset_y = math.sin(current_time * 2 + i * 0.5) * 2
+                    
+                    if i < stars:
+                        # Filled star with improved glow
+                        star_glow = pygame.Surface((star_size*2, star_size*2), pygame.SRCALPHA)
+                        glow_alpha = 50 + int(math.sin(current_time * 3 + i) * 20)
+                        pygame.draw.circle(star_glow, (255, 255, 0, glow_alpha), 
+                                         (star_size, star_size), star_size)
+                        surface.blit(star_glow, (star_x - star_size, star_y - star_size + star_offset_y))
+                        
+                        # Filled star with better shape
+                        pygame.draw.polygon(surface, YELLOW, [
+                            (star_x, star_y - star_size + star_offset_y),
+                            (star_x + star_size/4, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/4, star_y + star_offset_y),
+                            (star_x + star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x, star_y + star_size/4 + star_offset_y),
+                            (star_x - star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y + star_offset_y),
+                            (star_x - star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y - star_size/2 + star_offset_y),
+                        ])
+                    else:
+                        # Empty star with better contrast
+                        empty_star_color = (100, 100, 120)
+                        pygame.draw.polygon(surface, empty_star_color, [
+                            (star_x, star_y - star_size + star_offset_y),
+                            (star_x + star_size/4, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x + star_size/4, star_y + star_offset_y),
+                            (star_x + star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x, star_y + star_size/4 + star_offset_y),
+                            (star_x - star_size/2, star_y + star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y + star_offset_y),
+                            (star_x - star_size/2, star_y - star_size/2 + star_offset_y),
+                            (star_x - star_size/4, star_y - star_size/2 + star_offset_y),
+                        ], 2)
+            else:
+                # Improved lock icon for locked levels
+                lock_color = (180, 180, 180)
+                lock_size = 15
+                lock_x = rect.centerx
+                lock_y = rect.bottom + 15
+                
+                # Add subtle animation to lock
+                lock_float = math.sin(current_time * 2) * 2
+                
+                # Draw lock with shadow for depth
+                pygame.draw.rect(surface, (40, 40, 40), 
+                               (lock_x - lock_size//2 + 2, lock_y - lock_size//2 + 2 + lock_float, 
+                                lock_size, lock_size), 
+                               border_radius=3)
+                
+                # Draw lock body
+                pygame.draw.rect(surface, lock_color, 
+                               (lock_x - lock_size//2, lock_y - lock_size//2 + lock_float, 
+                                lock_size, lock_size), 
+                               border_radius=3)
+                
+                # Draw lock highlight for 3D effect
+                pygame.draw.line(surface, (220, 220, 220),
+                               (lock_x - lock_size//2 + 2, lock_y - lock_size//2 + 2 + lock_float),
+                               (lock_x - lock_size//2 + 2, lock_y + lock_size//2 - 2 + lock_float), 2)
+                
+                # Draw lock shackle with improved shape
+                pygame.draw.arc(surface, lock_color, 
+                              (lock_x - lock_size//2, lock_y - lock_size - lock_size//2 + lock_float, 
+                               lock_size, lock_size), 
+                              0, math.pi, 2)
+                
+                # Draw unlock requirement text with improved styling
+                if level > 1:  # Don't show for level 1
+                    stars_needed = level * REQUIRED_STARS_TO_UNLOCK
+                    req_text = tiny_font.render(f"Need {stars_needed} stars", True, (220, 220, 220))
+                    req_rect = req_text.get_rect(center=(rect.centerx, rect.bottom + 35 + lock_float))
+                    
+                    # Add subtle shadow for better readability
+                    shadow_text = tiny_font.render(f"Need {stars_needed} stars", True, (40, 40, 40))
+                    shadow_rect = shadow_text.get_rect(center=(req_rect.centerx + 1, req_rect.centery + 1))
+                    surface.blit(shadow_text, shadow_rect)
+                    surface.blit(req_text, req_rect)
+        
+        # Draw back button with improved styling
+        for button in self.menu_buttons["level_select"]:
+            # Update button style to match the new sleek design
+            button.color = (0, 100, 200)  
+            button.hover_color = (50, 150, 255)
+            button.draw(surface, glow=True)  # Assuming you have a glow parameter for the button class
+
+    def draw_level_complete(self, surface):
+        """Draw level complete screen"""
         # First draw the game state behind
         self.draw_game(surface)
         
         # Add overlay
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
+        overlay.fill((0, 0, 0, 180))
         surface.blit(overlay, (0, 0))
         
-        # Draw tutorial content
-        # (Add detailed tutorial instructions here)
-    
-    def handle_events(self):
-        """Handle all pygame events"""
-        mouse_pos = pygame.mouse.get_pos()
-        mouse_clicked = False
+        # Draw level complete text with animation
+        complete_text = heading_font.render("LEVEL COMPLETE!", True, WHITE)
         
-        # Handle events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return False  # Exit the game
+        # Animate text entry
+        time_since_complete = time.time() - self.level_complete_time
+        if time_since_complete < 0.5:
+            # Slide in from top
+            progress = time_since_complete / 0.5
+            text_y = -complete_text.get_height() + progress * (HEIGHT // 3 + complete_text.get_height())
+        else:
+            text_y = HEIGHT // 3
+            
+        complete_rect = complete_text.get_rect(centerx=WIDTH//2, top=text_y)
+        surface.blit(complete_text, complete_rect)
+        
+        # Draw stats with animation
+        if time_since_complete > 0.7:
+            stats_y = complete_rect.bottom + 50
+            spacing = 40
+            
+            # Time
+            minutes = int(self.level_time // 60)
+            seconds = int(self.level_time % 60)
+            time_text = medium_font.render(f"Time: {minutes:02d}:{seconds:02d}", True, WHITE)
+            time_rect = time_text.get_rect(centerx=WIDTH//2, top=stats_y)
+            surface.blit(time_text, time_rect)
+            
+            # Score
+            score_text = medium_font.render(f"Score: {self.score}", True, WHITE)
+            score_rect = score_text.get_rect(centerx=WIDTH//2, top=stats_y + spacing)
+            surface.blit(score_text, score_rect)
+            
+            # Stars collected
+            stars_text = medium_font.render(f"Stars Collected: {self.level_complete_stars}/3", True, YELLOW)
+            stars_rect = stars_text.get_rect(centerx=WIDTH//2, top=stats_y + spacing * 2)
+            surface.blit(stars_text, stars_rect)
+            
+            # Draw stars with animation
+            if time_since_complete > 1.0:
+                star_size = 40
+                star_spacing = 60
+                start_x = WIDTH//2 - star_spacing
+                star_y = stars_rect.bottom + 30
                 
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:  # Left mouse button
-                    mouse_clicked = True
+                for i in range(3):  # Max 3 stars per level
+                    star_x = start_x + i * star_spacing
+                    star_time = 1.0 + i * 0.5  # Stagger star animations
                     
-            if event.type == pygame.KEYDOWN:
-                # Global key handling
-                if event.key == pygame.K_ESCAPE:
-                    # ESC key behavior depends on state
-                    if self.state == GameState.PLAYING:
-                        self.set_state(GameState.PAUSED)
-                    elif self.state == GameState.PAUSED:
-                        self.set_state(GameState.PLAYING)
-                    elif self.state in [GameState.SETTINGS, GameState.CREDITS, GameState.LEVEL_SELECT]:
-                        self.set_state(GameState.MAIN_MENU)
+                    if time_since_complete > star_time:
+                        # Calculate animation progress
+                        star_progress = min(1.0, (time_since_complete - star_time) / 0.5)
                         
-                # State-specific key handling
-                if self.state == GameState.PLAYING:
-                    if event.key == self.settings["controls"]["pause"]:
-                        self.toggle_pause()
-                    elif event.key == self.settings["controls"]["reset"]:
-                        self.restart_level()
-                    elif event.key == pygame.K_g and self.gravity_field_active:
-                        # Toggle gravity field direction
-                        if self.gravity_field_strength == 0:
-                            self.gravity_field_strength = 0.2
-                            self.gravity_field_color = (148, 0, 211, 80)  # Purple (pull)
-                            play_sound("button_click", 0.5)
-                        elif self.gravity_field_strength > 0:
-                            self.gravity_field_strength = -0.2
-                            self.gravity_field_color = (0, 191, 255, 80)  # Blue (push)
-                            play_sound("button_click", 0.5)
+                        # Scale and fade in
+                        current_size = star_size * star_progress
+                        alpha = int(255 * star_progress)
+                        
+                        if i < self.level_complete_stars:
+                            # Play star sound once for each star
+                            if star_progress < 0.1 and i == 0:
+                                play_sound("star", 0.8)
+                            elif star_progress < 0.1 and i == 1:
+                                play_sound("star", 0.8)
+                            elif star_progress < 0.1 and i == 2:
+                                play_sound("star", 0.8)
+                                
+                            # Filled star with animation
+                            star_surf = pygame.Surface((star_size*2, star_size*2), pygame.SRCALPHA)
+                            
+                            # Draw star polygon
+                            pygame.draw.polygon(star_surf, YELLOW + (alpha,), [
+                                (star_size, 0),
+                                (star_size + star_size/4, star_size - star_size/2),
+                                (star_size*2, star_size - star_size/2),
+                                (star_size + star_size/2, star_size),
+                                (star_size*2, star_size*2),
+                                (star_size, star_size + star_size/2),
+                                (0, star_size*2),
+                                (star_size - star_size/2, star_size),
+                                (0, star_size - star_size/2),
+                                (star_size - star_size/4, star_size - star_size/2),
+                            ])
+                            
+                            # Scale to animation size
+                            if current_size < star_size:
+                                scale_factor = current_size / star_size
+                                scaled_star = pygame.transform.scale(
+                                    star_surf, 
+                                    (int(star_surf.get_width() * scale_factor), 
+                                     int(star_surf.get_height() * scale_factor))
+                                )
+                                star_rect = scaled_star.get_rect(center=(star_x, star_y))
+                                surface.blit(scaled_star, star_rect)
+                            else:
+                                # Add pulsing effect when fully shown
+                                pulse = 1 + 0.2 * math.sin((time_since_complete - star_time) * 5)
+                                pulse_size = int(star_size * 2 * pulse)
+                                scaled_star = pygame.transform.scale(
+                                    star_surf, 
+                                    (pulse_size, pulse_size)
+                                )
+                                star_rect = scaled_star.get_rect(center=(star_x, star_y))
+                                surface.blit(scaled_star, star_rect)
                         else:
-                            self.gravity_field_strength = 0
-                            play_sound("button_click", 0.3)
-                    elif event.key == pygame.K_SPACE and self.level_num == 1:
-                        # Advance tutorial
-                        self.tutorial_step += 1
-                        play_sound("button_click", 0.5)
-        
-        # Handle button interactions for different states
-        if self.state == GameState.MAIN_MENU:
-            for button in self.menu_buttons["main"]:
-                if button.update(mouse_pos, mouse_clicked):
-                    button.action()
-                    
-        elif self.state == GameState.LEVEL_SELECT:
-            # Check level buttons
-            for button in self.level_select_buttons:
-                if button["unlocked"] and button["rect"].collidepoint(mouse_pos) and mouse_clicked:
-                    self.level_num = button["level"]
-                    self.set_state(GameState.PLAYING)
-                    play_sound("button_click")
-                    
-            # Check back button
-            for button in self.menu_buttons["level_select"]:
-                if button.update(mouse_pos, mouse_clicked):
-                    button.action()
-                    
-        elif self.state == GameState.PAUSED:
-            for button in self.menu_buttons["paused"]:
-                if button.update(mouse_pos, mouse_clicked):
-                    button.action()
-                    
-        elif self.state == GameState.LEVEL_COMPLETE:
-            for button in self.menu_buttons["level_complete"]:
-                if button.update(mouse_pos, mouse_clicked):
-                    button.action()
-                    
-        elif self.state == GameState.GAME_OVER:
-            for button in self.menu_buttons["game_over"]:
-                if button.update(mouse_pos, mouse_clicked):
-                    button.action()
-                    
-        elif self.state == GameState.SETTINGS:
-            # Update settings sliders
-            for slider in self.settings_sliders.values():
-                slider.update(mouse_pos, pygame.mouse.get_pressed())
-                
-            # Update toggle buttons
-            for button in self.settings_toggle_buttons:
-                if button.update(mouse_pos, mouse_clicked):
-                    button.action()
-                    
-            # Update back button
-            for button in self.menu_buttons["settings"]:
-                if button.update(mouse_pos, mouse_clicked):
-                    button.action()
-                    self.save_settings()
-                    
-        elif self.state == GameState.CREDITS:
-            for button in self.menu_buttons["settings"]:
-                if button.update(mouse_pos, mouse_clicked):
-                    button.action()
-        
-        return True  # Continue the game loop
-    
-    def run(self):
-        """Main game loop"""
-        running = True
-        
-        # Initialize game
-        self.set_state(GameState.MAIN_MENU)
-        play_music("menu")
-        
-        # For calculating delta time
-        prev_time = time.time()
-        
-        while running:
-            # Calculate delta time
-            current_time = time.time()
-            dt = current_time - prev_time
-            prev_time = current_time
-            
-            # Cap dt to prevent large jumps
-            dt = min(dt, 0.1)
-            
-            # Handle events
-            running = self.handle_events()
-            
-            # Handle keyboard input
-            if self.state == GameState.PLAYING:
-                self.handle_input(pygame.key.get_pressed())
-            
-            # Update game state
-            self.update(dt)
-            
-            # Draw the game
-            self.draw(screen)
-            
-            # Update the display
-            pygame.display.flip()
-            
-            # Cap the frame rate
-            clock.tick(FPS)
-            
-        # Save settings and high scores before quitting
-        self.save_settings()
-        self.save_highscores()
-        self.save_level_data()
-        
-        pygame.quit()
-        sys.exit()
-
+                            # Empty star
+                            star_surf = pygame.Surface((star_size*2, star_size*2), pygame.SRCALPHA)
+                            pygame.draw.polygon(star_surf, (100, 100, 100, alpha), [
+                                (star_size, 0),
+                                (star_size + star_size/4, star_size - star_size/2),
+                                (star_size*2, star_size - star_size/2),
+                                (star_size + star_size/2, star_size),
+                                (star_size*2, star_size*2),
+                                (star_size, star_size + star_size/2),
+                                (0, star_size*2),
+                                (star_size - star_size/2, star_size),
+                                (0, star_size - star_size/2),
+                                (star_size - star_size/4, star_size - star_size/2),
+                            ], 2)
+                            
+                            # Scale to animation size
+                            if current_size < star_size:
+                                scale_factor = current_size / star_size
+                                scaled_star = pygame.transform.scale(
+                                    star_surf, 
+                                    (int(star_surf.get_width() * scale_factor), 
+                                     int(star_surf.get_height() * scale_factor))
+                                )
+                                star_rect = scaled_star.get_rect(center=(star_x, star_y))
+                                surface.blit(scaled_star, star_rect)
 # Main entry point
 if __name__ == "__main__":
     game = Game()

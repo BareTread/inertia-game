@@ -1,15 +1,16 @@
 {
-    "music_volume": 0.68,
-    "sound_volume": 0.47333333333333333,
-    "screen_shake": true,
+    "sound_volume": 0.7,
+    "music_volume": 0.5,
     "particles": true,
+    "screen_shake": true,
+    "show_fps": false,
     "fullscreen": false,
     "controls": {
         "up": 1073741906,
         "down": 1073741905,
         "left": 1073741904,
         "right": 1073741903,
-        "pause": 112,
+        "pause": 32,
         "reset": 114
     }
 }
