@@ -45,6 +45,17 @@ class Target:
         # Draw center dot
         center_radius = current_radius * 0.3
         pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), int(center_radius))
+        
+        # Add pulsing outline for required targets
+        if self.required and not self.hit:
+            outline_radius = self.radius + 5 + math.sin(self.pulse_timer * 2) * 3
+            pygame.draw.circle(
+                surface,
+                (255, 255, 100),
+                (int(self.x), int(self.y)),
+                int(outline_radius),
+                2
+            )
     
     def check_collision(self, ball):
         """

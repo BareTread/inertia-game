@@ -91,13 +91,13 @@ class Particle:
         # Enhanced glow effect for particles
         if self.glow:
             # Create a larger surface for the glow with per-pixel alpha
-            glow_size = current_size * 3  # Larger glow radius
+            glow_size = current_size * 2.1  # Reduced from 3.0 for more subtle effect
             glow_surf = pygame.Surface((int(glow_size * 2), int(glow_size * 2)), pygame.SRCALPHA)
             
             # Create a more dynamic glow using multiple circles with decreasing alpha
             for r in range(int(glow_size), 0, -2):
-                # Calculate alpha based on radius and particle age
-                glow_alpha = int(alpha * 0.7 * (r / glow_size))
+                # Calculate alpha based on radius and particle age - reduced by 30%
+                glow_alpha = int(alpha * 0.5 * (r / glow_size))  # Reduced from 0.7
                 
                 # Create a slight color shift for outer glow
                 glow_color = list(self.color)
@@ -330,9 +330,9 @@ class ParticleSystem:
                 px = x + math.cos(angle) * distance
                 py = y + math.sin(angle) * distance
                 
-                # Velocity - tangential to the spiral
+                # Velocity - tangential to the spiral - reduced by ~30%
                 tangent_angle = angle + math.pi/2
-                speed = 50 + (150 * (1 - delay_factor))  # Faster at center, slower at edge
+                speed = 35 + (105 * (1 - delay_factor))  # Reduced from 50 + 150
                 vel_x = math.cos(tangent_angle) * speed
                 vel_y = math.sin(tangent_angle) * speed
                 
@@ -342,13 +342,13 @@ class ParticleSystem:
                 g = min(255, int(color[1] * (1 - hue_shift) + 100 * hue_shift))
                 b = min(255, int(color[2] * (1 - hue_shift) + 200 * hue_shift))
                 
-                # Create the particle
-                size = 3 + (2 * (1 - delay_factor))  # Larger particles near center
+                # Create the particle - smaller size for subtlety
+                size = 2 + (1.5 * (1 - delay_factor))  # Reduced from 3 + 2
                 self.add_particle(
                     px, py, vel_x, vel_y, 
                     (r, g, b), size, 
-                    lifetime * (0.5 + (0.5 * delay_factor)),  # Longer lifetime for outer particles
+                    lifetime * (0.5 + (0.5 * delay_factor)),
                     0, "smooth", True, 
-                    random.uniform(0, math.pi * 2),  # Random rotation
-                    rotation_speed * (1 - delay_factor)  # Faster rotation near center
+                    random.uniform(0, math.pi * 2),
+                    rotation_speed * (1 - delay_factor) * 0.7  # Reduced rotation speed by 30%
                 ) 

@@ -290,6 +290,9 @@ class Game:
         # Generate level data
         level_data = generate_level(level_num)
         
+        # Store the full level data for tutorial elements and hints
+        self.level_data = level_data
+        
         # Create entities from level data
         self.walls = level_data["walls"]
         self.targets = level_data["targets"]
@@ -983,13 +986,13 @@ class Game:
                     closest_x = max(wall.rect.left, min(self.ball.x, wall.rect.right))
                     closest_y = max(wall.rect.top, min(self.ball.y, wall.rect.bottom))
                     
-                    # Create a quick white flash at collision point
+                    # Create a quick white flash at collision point (reduced intensity)
                     flash_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
                     pygame.draw.circle(
                         flash_surface, 
-                        (255, 255, 255, min(150, int(impact_speed * 15))),
+                        (255, 255, 255, min(100, int(impact_speed * 10))),  # Reduced from 150 and 15
                         (int(closest_x), int(closest_y)), 
-                        int(self.ball.radius * 1.5)
+                        int(self.ball.radius * 1.2)  # Reduced from 1.5
                     )
                     self.screen.blit(flash_surface, (0, 0), special_flags=pygame.BLEND_ADD)
                 
@@ -1167,25 +1170,27 @@ class Game:
     
     def _create_powerup_effect(self, x: float, y: float, color: Tuple[int, int, int]) -> None:
         """Create an enhanced visual effect when collecting a powerup."""
-        # Add spiral burst effect for a more satisfying visual
+        # Add spiral burst effect for a more satisfying visual, but more subtle
         self.particle_system.add_spiral_burst(
             x, y,
             color=color,
-            spiral_count=3,
-            particles_per_spiral=10,
-            radius=70,
-            lifetime=1.2
+            spiral_count=2,  # Reduced from 3
+            particles_per_spiral=7,  # Reduced from 10
+            radius=50,  # Reduced from 70
+            lifetime=0.9  # Reduced from 1.2
         )
         
-        # Also add the original energy burst for extra effect
+        # Also add the original energy burst for extra effect, but with fewer particles
         self.particle_system.add_energy_burst(
             x, y,
-            color=color
+            color=color,
+            count=20,  # Reduced count for subtlety
+            speed=120  # Reduced speed
         )
         
-        # Apply screen shake for better feedback
+        # Apply milder screen shake for better feedback
         if self.settings["screen_shake"]:
-            self._apply_screen_shake(5)
+            self._apply_screen_shake(3.5)  # Reduced from 5
     
     def _check_level_complete(self) -> bool:
         """Check if all required targets have been hit."""
@@ -1354,6 +1359,9 @@ class Game:
         for bounce_pad in self.bounce_pads:
             bounce_pad.draw(game_surface)
         
+        # Draw tutorial elements if present
+        self._draw_tutorial_elements(game_surface)
+        
         # Draw trajectory preview line if applying force
         if self.applying_force and self.force_magnitude > 0:
             # Calculate endpoint of trajectory
@@ -1371,7 +1379,7 @@ class Game:
                 (255, 255, 0),  # Bright yellow
                 (int(self.ball.x), int(self.ball.y)),
                 (int(self.ball.x + norm_x * segment_length * 2), int(self.ball.y + norm_y * segment_length * 2)),
-                max(4, int(self.force_magnitude * 2))  # Thicker line based on force
+                max(3, int(self.force_magnitude * 1.4))  # Reduced from max(4, int(self.force_magnitude * 2))
             )
             
             # Draw dotted trajectory line with segments
@@ -1818,6 +1826,80 @@ class Game:
                 force_y = dy / distance * force_scale
         
         return force_x, force_y
+
+    def _draw_tutorial_elements(self, surface):
+        """Draw tutorial elements like arrows and hints."""
+        # Check if we have tutorial elements
+        if hasattr(self, 'level_data') and self.level_data.get('tutorial_elements'):
+            for element in self.level_data['tutorial_elements']:
+                if element['type'] == 'arrow':
+                    # Draw a directional arrow
+                    start_pos = element['start']
+                    end_pos = element['end']
+                    color = element.get('color', (255, 255, 0))  # Default to yellow
+                    text = element.get('text', '')
+                    
+                    # Calculate arrow properties
+                    arrow_length = math.sqrt((end_pos[0] - start_pos[0])**2 + (end_pos[1] - start_pos[1])**2)
+                    direction_x = (end_pos[0] - start_pos[0]) / arrow_length if arrow_length > 0 else 0
+                    direction_y = (end_pos[1] - start_pos[1]) / arrow_length if arrow_length > 0 else 0
+                    
+                    # Add animation to make it pulsate
+                    pulse = math.sin(pygame.time.get_ticks() * 0.005) * 0.2 + 0.8  # 0.6 to 1.0 scale factor
+                    thickness = int(max(3, 5 * pulse))
+                    
+                    # Draw the line
+                    pygame.draw.line(
+                        surface, 
+                        color, 
+                        start_pos,
+                        (end_pos[0] - direction_x * 20, end_pos[1] - direction_y * 20),  # Cut short for arrowhead
+                        thickness
+                    )
+                    
+                    # Draw the arrowhead
+                    arrow_size = 15 * pulse
+                    angle = math.atan2(direction_y, direction_x)
+                    arr_x1 = end_pos[0] - arrow_size * math.cos(angle - math.pi/6)
+                    arr_y1 = end_pos[1] - arrow_size * math.sin(angle - math.pi/6)
+                    arr_x2 = end_pos[0] - arrow_size * math.cos(angle + math.pi/6)
+                    arr_y2 = end_pos[1] - arrow_size * math.sin(angle + math.pi/6)
+                    
+                    pygame.draw.polygon(
+                        surface,
+                        color,
+                        [(end_pos[0], end_pos[1]), (arr_x1, arr_y1), (arr_x2, arr_y2)]
+                    )
+                    
+                    # Draw the text if present
+                    if text:
+                        text_color = color
+                        text_surface = self.regular_font.render(text, True, text_color)
+                        text_pos = (
+                            (start_pos[0] + end_pos[0]) // 2 - text_surface.get_width() // 2,
+                            (start_pos[1] + end_pos[1]) // 2 - 30  # Offset above the line
+                        )
+                        
+                        # Add a subtle background for better readability
+                        text_bg = pygame.Surface((text_surface.get_width() + 10, text_surface.get_height() + 10))
+                        text_bg.fill((30, 30, 30))
+                        text_bg.set_alpha(150)
+                        surface.blit(text_bg, (text_pos[0] - 5, text_pos[1] - 5))
+                        
+                        # Draw with a slight glow effect
+                        glow_surface = pygame.Surface((text_surface.get_width() + 8, text_surface.get_height() + 8), pygame.SRCALPHA)
+                        glow_text = self.regular_font.render(text, True, (color[0]//2, color[1]//2, color[2]//2))
+                        for offset_x, offset_y in [(0,1), (1,0), (0,-1), (-1,0)]:
+                            glow_surface.blit(glow_text, (4 + offset_x, 4 + offset_y))
+                        
+                        surface.blit(glow_surface, (text_pos[0] - 4, text_pos[1] - 4))
+                        surface.blit(text_surface, text_pos)
+            
+            # Draw hint text if present
+            if self.level_data.get('hint'):
+                hint_text = self.level_data['hint']
+                text_surface = self.small_font.render(hint_text, True, (200, 200, 200))
+                surface.blit(text_surface, (WIDTH // 2 - text_surface.get_width() // 2, HEIGHT - 50))
 
     def run(self) -> None:
         """Run the game loop."""

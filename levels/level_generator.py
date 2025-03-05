@@ -46,6 +46,16 @@ def generate_tutorial_level():
         PowerUp(550, 350, "energy", 50)
     ]
     
+    # Add clear directional arrows for tutorial guidance
+    tutorial_elements = []
+    tutorial_elements.append({
+        "type": "arrow",
+        "start": (150, 250),
+        "end": (400, 300),
+        "text": "Hit the target!",
+        "color": (255, 255, 0)
+    })
+    
     return {
         "walls": walls,
         "targets": targets,
@@ -55,7 +65,9 @@ def generate_tutorial_level():
         "background_color": (20, 20, 30),
         "time_limit": 60,
         "energy_drain": 0,
-        "tutorial": True
+        "tutorial": True,
+        "tutorial_elements": tutorial_elements,
+        "hint": "Use arrow keys to apply force to the ball"
     }
 
 def generate_level_2():
