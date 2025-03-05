@@ -32,9 +32,9 @@ class GameState(Enum):
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
-GREEN = (0, 255, 0)
-BLUE = (0, 0, 255)
-YELLOW = (255, 255, 0)
+GREEN = (20, 220, 20)    # More vibrant green
+BLUE = (0, 120, 255)     # More vibrant blue
+YELLOW = (255, 220, 0)   # More golden yellow
 CYAN = (0, 255, 255)
 MAGENTA = (255, 0, 255)
 ORANGE = (255, 165, 0)

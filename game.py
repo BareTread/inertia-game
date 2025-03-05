@@ -897,8 +897,14 @@ class Game:
             
         # Regenerate energy when not applying force
         if not self.applying_force and self.energy < ENERGY_MAX:
-            self.energy += ENERGY_REGEN * effective_dt
-            
+            # Apply faster energy regeneration in early levels for gentler learning curve
+            if self.current_level <= 3:
+                energy_regen_multiplier = 1.5  # Faster energy regen in early levels
+            else:
+                energy_regen_multiplier = 1.0
+                
+            self.energy += ENERGY_REGEN * effective_dt * energy_regen_multiplier
+        
         # Apply energy drain (for higher levels)
         if self.energy_drain > 0:
             self.energy = max(0, self.energy - self.energy_drain * effective_dt)
@@ -933,7 +939,7 @@ class Game:
             teleporter.update(effective_dt)
             if teleporter.check_collision(self.ball):
                 teleporter.teleport_ball(self.ball)
-                play_sound("teleport", 0.5)
+                play_sound("teleport", 0.65)  # Increased from 0.5
                 self._apply_screen_shake(0.7)
         
         # Update powerup effects
@@ -941,7 +947,7 @@ class Game:
             result = powerup.handle_collision(self.ball)
             if result:
                 # Powerup was collected
-                play_sound("powerup")
+                play_sound("powerup", 0.7)  # Added volume parameter
                 
                 # Apply powerup effect
                 self._apply_powerup(result)
@@ -973,7 +979,7 @@ class Game:
             collided = wall.handle_collision(self.ball)
             if collided:
                 # Play collision sound
-                play_sound("collision", 0.3)
+                play_sound("collision", 0.45)  # Increased from 0.3
                 
                 # Calculate impact velocity for effect intensity
                 impact_speed = self.ball.get_speed()
@@ -1001,10 +1007,10 @@ class Game:
                     self.particle_system.add_explosion(
                         self.ball.x, self.ball.y,
                         (255, 255, 255),
-                        count=particle_count,
-                        speed=impact_speed * 10,
-                        size_range=(2, 5),
-                        lifetime_range=(0.3, 0.7),
+                        count=particle_count + 15,  # Increased particle count
+                        speed=impact_speed * 12,  # Increased speed for more dramatic effect
+                        size_range=(2, 6),  # Slightly larger particles
+                        lifetime_range=(0.3, 0.8),  # Slightly longer lifetime
                         glow=True
                     )
                 
@@ -1049,7 +1055,7 @@ class Game:
         for target in self.targets:
             if target.handle_collision(self.ball):
                 # Target was hit
-                play_sound("powerup")
+                play_sound("powerup", 0.8)  # Increased volume
                 
                 # Add score
                 self.score += target.points
@@ -1140,7 +1146,7 @@ class Game:
             result = powerup.handle_collision(self.ball)
             if result:
                 # Powerup was collected
-                play_sound("powerup")
+                play_sound("powerup", 0.7)  # Added volume parameter
                 
                 # Apply powerup effect
                 self._apply_powerup(result)
@@ -1155,12 +1161,18 @@ class Game:
         value = powerup_data["value"]
         
         if powerup_type == "energy":
-            # Restore energy
+            # Make energy powerups more satisfying
             self.energy = min(ENERGY_MAX, self.energy + value)
-            self.toasts.append(Toast(f"+{value} Energy", duration=1.5, position="top"))
+            self.toasts.append(Toast(f"+{value} Energy!", duration=1.5, position="top"))
+            
+            # Add temporary boost effect
+            self.ball.pulse_timer = 0  # Reset pulse
+            self.ball.pulse_amount = 5  # Larger pulse effect
             
         elif powerup_type == "speed":
-            # Increase ball speed temporarily (not implemented in MVP)
+            # Actually implement speed boost
+            self.ball.vel_x *= 1.5
+            self.ball.vel_y *= 1.5
             self.toasts.append(Toast("Speed Boost!", duration=1.5, position="top"))
             
         elif powerup_type == "time":
@@ -1323,10 +1335,10 @@ class Game:
             return
             
         # Use the enhanced particle system's screen shake effect
-        self.particle_system.add_screen_shake_particles(intensity)
+        self.particle_system.add_screen_shake_particles(intensity * 1.25)  # Increased intensity
         
-        # Store the shake intensity for the draw method
-        self.screen_shake = intensity
+        # Store the shake intensity for the draw method with slightly longer duration
+        self.screen_shake = intensity * 1.3  # Increased intensity and duration
 
     def _draw_game(self) -> None:
         """Draw the gameplay state."""

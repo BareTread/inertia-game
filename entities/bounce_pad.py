@@ -158,13 +158,14 @@ class BouncePad:
     def _bounce_ball(self, ball) -> None:
         """Apply bounce effect to the ball."""
         if self.activate_cooldown <= 0:
-            # Get current ball velocity
+            # Calculate more satisfying bounce
             current_speed = math.sqrt(ball.vel_x**2 + ball.vel_y**2)
             
-            # Calculate new velocity in the bounce direction
-            new_speed = current_speed * self.strength
-            ball.vel_x = self.direction[0] * new_speed
-            ball.vel_y = self.direction[1] * new_speed
+            # Minimum bounce speed ensures consistency
+            bounce_speed = max(current_speed * self.strength, 200)
+            
+            ball.vel_x = self.direction[0] * bounce_speed
+            ball.vel_y = self.direction[1] * bounce_speed
             
             # Activate visual effect
             self.active = True

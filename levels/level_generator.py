@@ -83,8 +83,8 @@ def generate_level_2():
     ]
     
     targets = [
-        Target(700, 100, 20, 100, True),
-        Target(100, 500, 20, 50, False)
+        Target(700, 100, 25, 100, True),
+        Target(100, 500, 25, 50, False)
     ]
     
     surfaces = [
@@ -103,8 +103,8 @@ def generate_level_2():
         "powerups": powerups,
         "start_pos": (100, 100),
         "background_color": (20, 30, 50),
-        "time_limit": 45,
-        "energy_drain": 0.1,
+        "time_limit": 60,
+        "energy_drain": 0.05,
         "tutorial": False
     }
 
