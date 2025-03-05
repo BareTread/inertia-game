@@ -23,6 +23,14 @@ class Ball:
         self.glow_color = (100, 150, 255, 100)  # Blueish glow
         self.color = BLUE
         
+        # Mastery reward visual effects
+        self.trail_enabled = False
+        self.trail_color = BLUE
+        self.collision_particles_enabled = False
+        self.collision_particle_color = WHITE
+        self.pulse_color = WHITE
+        self.pulse_strength = 1.0
+        
     def apply_force(self, force_x, force_y):
         """Apply a force to the ball, changing its velocity."""
         # Add "weight" to movement for better feel
@@ -51,93 +59,56 @@ class Ball:
             self.vel_y = 0
         
         # Update position
-        self.x += self.vel_x
-        self.y += self.vel_y
+        self.x += self.vel_x * dt * 60  # Scale by dt and 60 to normalize for framerate
+        self.y += self.vel_y * dt * 60
         
-        # Update trail
+        # Update trail positions
         self.trail_timer += dt
-        if self.trail_timer >= self.trail_interval:
+        if self.trail_timer >= self.trail_interval and (abs(self.vel_x) > 0.5 or abs(self.vel_y) > 0.5):
             self.trail_timer = 0
             self.trail_positions.append((self.x, self.y))
             
             # Limit trail length
             if len(self.trail_positions) > self.max_trail_length:
                 self.trail_positions.pop(0)
-                
-        # Clamp ball position to prevent it from going off-screen
+        
+        # Keep ball within screen bounds
         self.x = clamp(self.x, self.radius, WIDTH - self.radius)
         self.y = clamp(self.y, self.radius, HEIGHT - self.radius)
         
-    def draw(self, surface):
-        """Draw the ball and its trail on the given surface."""
-        # Draw trail
-        if len(self.trail_positions) > 1:
-            for i in range(1, len(self.trail_positions)):
-                # Calculate alpha value based on position in trail
+    def draw(self, screen):
+        """Draw the ball and its effects."""
+        # Draw trail first (behind ball)
+        if self.trail_enabled and len(self.trail_positions) > 2:
+            # Draw trail as a fading line
+            for i in range(len(self.trail_positions) - 1):
+                # Calculate alpha based on position in trail
                 alpha = int(255 * (i / len(self.trail_positions)))
-                # Calculate size based on position in trail
-                size = int(self.radius * 0.8 * (i / len(self.trail_positions)))
-                
-                prev_pos = self.trail_positions[i-1]
-                curr_pos = self.trail_positions[i]
-                
-                # Draw trail segment with gradient color
-                speed = math.sqrt(self.vel_x**2 + self.vel_y**2)
-                color_intensity = min(255, int(speed * 10))
-                trail_color = (100, 100, 255, alpha)  # Blue trail
-                
-                pygame.draw.line(
-                    surface,
-                    trail_color,
-                    prev_pos,
-                    curr_pos,
-                    max(1, size)
-                )
+                color = (*self.trail_color[:3], alpha)
+                pos1 = self.trail_positions[i]
+                pos2 = self.trail_positions[i + 1]
+                # Calculate width based on position (thicker toward the ball)
+                width = int(1 + (i / len(self.trail_positions)) * 3)
+                pygame.draw.line(screen, color, pos1, pos2, width)
         
-        # Calculate current radius with pulse effect
-        current_radius = self.radius + self.pulse_amount
-        
-        # Draw dynamic glow effect based on speed
-        speed = math.sqrt(self.vel_x**2 + self.vel_y**2)
-        glow_intensity = min(150, int(50 + speed * 5))
-        dynamic_glow_radius = self.glow_radius + speed * 0.2
-        
-        # Create a surface for the glow with per-pixel alpha
-        glow_surf = pygame.Surface((int(dynamic_glow_radius * 2), int(dynamic_glow_radius * 2)), pygame.SRCALPHA)
-        
-        # Draw multiple circles with decreasing alpha for a better glow effect
-        for r in range(int(dynamic_glow_radius), 0, -5):
-            alpha = int(glow_intensity * (r / dynamic_glow_radius))
-            pygame.draw.circle(
-                glow_surf, 
-                (100, 150, 255, alpha), 
-                (int(dynamic_glow_radius), int(dynamic_glow_radius)), 
-                r
-            )
-        
-        # Blit the glow surface
-        surface.blit(
-            glow_surf, 
-            (self.x - dynamic_glow_radius, self.y - dynamic_glow_radius), 
-            special_flags=pygame.BLEND_ADD
-        )
-        
-        # Draw main ball
-        pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), int(current_radius))
-        
-        # Draw velocity vector line
-        if abs(self.vel_x) > 0.1 or abs(self.vel_y) > 0.1:
-            # Calculate normalized velocity vector
-            vel_length = math.sqrt(self.vel_x**2 + self.vel_y**2)
-            norm_vel_x = self.vel_x / vel_length if vel_length > 0 else 0
-            norm_vel_y = self.vel_y / vel_length if vel_length > 0 else 0
+        # Draw glow effect
+        if self.glow_radius > 0:
+            # Create a surface for the glow with alpha
+            glow_surface = pygame.Surface((self.glow_radius * 2, self.glow_radius * 2), pygame.SRCALPHA)
+            # Draw radial gradient for glow
+            pygame.draw.circle(glow_surface, self.glow_color, (self.glow_radius, self.glow_radius), self.glow_radius)
+            # Draw the glow surface on the screen
+            screen.blit(glow_surface, (self.x - self.glow_radius, self.y - self.glow_radius), special_flags=pygame.BLEND_ALPHA_SDL2)
             
-            # Draw line in the direction of movement
-            line_length = min(vel_length * 3, self.radius * 2)
-            end_x = self.x + norm_vel_x * line_length
-            end_y = self.y + norm_vel_y * line_length
+        # Calculate pulsing size
+        pulse_radius = self.radius + self.pulse_amount * self.pulse_strength
             
-            pygame.draw.line(surface, RED, (self.x, self.y), (end_x, end_y), 2)
+        # Draw the ball itself
+        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), int(pulse_radius))
+        
+        # Draw pulse outline if pulsing
+        if self.pulse_amount > 0.1 and self.pulse_strength > 0:
+            pygame.draw.circle(screen, self.pulse_color, (int(self.x), int(self.y)), int(pulse_radius), 2)
     
     def reset_velocity(self):
         """Reset the ball's velocity to zero."""

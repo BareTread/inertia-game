@@ -74,3 +74,19 @@ DEFAULT_SETTINGS = {
 DEFAULT_LEVEL_TIME = 60  # Default time limit in seconds
 DEFAULT_ENERGY_DRAIN = 0.0  # Default energy drain per second
 MAX_STARS = 3  # Maximum stars per level 
+
+# Progressive Mastery System
+MASTERY_METRICS = ["time", "energy", "precision", "targets"]
+MASTERY_LEVELS = ["beginner", "intermediate", "advanced", "master"]
+MASTERY_THRESHOLDS = {
+    "time": [0.4, 0.6, 0.8, 0.95],      # Time efficiency thresholds
+    "energy": [0.3, 0.5, 0.7, 0.9],     # Energy efficiency thresholds
+    "precision": [0.2, 0.4, 0.6, 0.8],  # Precision thresholds
+    "targets": [0.7, 0.8, 0.9, 1.0]     # Target hit ratio thresholds
+}
+MASTERY_REWARDS = {
+    "time": ["blue_trail", "cyan_trail", "white_trail", "rainbow_trail"],
+    "energy": ["small_glow", "medium_glow", "large_glow", "energy_aura"],
+    "precision": ["bronze_spark", "silver_spark", "gold_spark", "diamond_spark"],
+    "targets": ["green_pulse", "yellow_pulse", "orange_pulse", "red_pulse"]
+} 

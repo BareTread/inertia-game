@@ -5,18 +5,20 @@ import time
 import os
 import math
 import random
+import colorsys
 from typing import Dict, List, Tuple, Optional, Any, Union
 
 from utils.constants import (
     WIDTH, HEIGHT, FPS, ENERGY_MAX, ENERGY_REGEN, FORCE_COST, FRICTION,
     GameState, WHITE, BLACK, RED, GREEN, BLUE, YELLOW, PURPLE, ORANGE, 
-    CYAN, DARK_GRAY, GRAY, REQUIRED_STARS_TO_UNLOCK
+    CYAN, DARK_GRAY, GRAY, REQUIRED_STARS_TO_UNLOCK, MASTERY_METRICS, MASTERY_THRESHOLDS, MASTERY_REWARDS, MASTERY_LEVELS
 )
 from utils.constants import HIGHSCORE_FILE, LEVELS_FILE, SETTINGS_FILE
 from utils.constants import TRANSPARENT_BLACK
 from utils.sound import load_sounds, play_sound, set_sound_volume, set_music_volume
 from utils.particle import ParticleSystem
 from utils.helpers import distance, normalize_vector, clamp, lerp, circle_rect_collision, circle_circle_collision
+from utils.tutorial import TutorialElement
 
 # Define our own light gray color
 LIGHT_GRAY = (200, 200, 200)
@@ -106,6 +108,13 @@ class Game:
         self.force_direction = (0, 0)
         self.force_magnitude = 0
         
+        # Mastery system
+        self.mastery_data = {metric: 0.0 for metric in MASTERY_METRICS}
+        self.mastery_levels = {metric: 0 for metric in MASTERY_METRICS}
+        self.active_rewards = {metric: None for metric in MASTERY_METRICS}
+        self.precision_moves = []  # Track directional changes
+        self.target_stats = {"hit": 0, "total": 0}
+        
         # Create main menu buttons
         self._setup_main_menu()
     
@@ -151,31 +160,54 @@ class Game:
             pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
     
     def _load_levels_data(self) -> Dict[str, Any]:
-        """Load level data from file or use defaults."""
-        # Default level data
-        self.levels_data = {
+        """Load levels data from file or use defaults."""
+        # Default levels data
+        levels_data = {
             "unlocked": 1,
             "stars": {},
             "times": {},
-            "levels": {}
+            "levels": {},
+            "mastery": {
+                "data": {metric: 0.0 for metric in MASTERY_METRICS},
+                "levels": {metric: 0 for metric in MASTERY_METRICS},
+                "rewards": {metric: None for metric in MASTERY_METRICS}
+            }
         }
         
-        # Try to load level data from file
+        # Try to load levels data from file
         try:
             if os.path.exists(LEVELS_FILE):
                 with open(LEVELS_FILE, "r") as f:
-                    self.levels_data = json.load(f)
+                    loaded_data = json.load(f)
+                    # Update levels data with loaded values
+                    for key, value in loaded_data.items():
+                        levels_data[key] = value
+                    
                     # Ensure times key exists for older save files
-                    if "times" not in self.levels_data:
-                        self.levels_data["times"] = {}
+                    if "times" not in levels_data:
+                        levels_data["times"] = {}
+                        
+                    # Ensure mastery data exists
+                    if "mastery" not in levels_data:
+                        levels_data["mastery"] = {
+                            "data": {metric: 0.0 for metric in MASTERY_METRICS},
+                            "levels": {metric: 0 for metric in MASTERY_METRICS},
+                            "rewards": {metric: None for metric in MASTERY_METRICS}
+                        }
+                    
+                    # Load mastery data into instance variables
+                    self.mastery_data = levels_data["mastery"]["data"]
+                    self.mastery_levels = levels_data["mastery"]["levels"]
+                    self.active_rewards = levels_data["mastery"]["rewards"]
         except Exception as e:
-            print(f"Error loading level data: {e}")
-            print("Using default level data")
+            print(f"Error loading levels data: {e}")
+            print("Using default levels data")
         
         # Calculate total stars
-        total_stars = sum(self.levels_data.get("stars", {}).values())
-        self.levels_data["total_stars"] = total_stars
-        return self.levels_data
+        total_stars = sum(levels_data.get("stars", {}).values())
+        levels_data["total_stars"] = total_stars
+        
+        return levels_data
     
     def _save_settings(self) -> None:
         """Save current settings to file."""
@@ -298,29 +330,28 @@ class Game:
         self.targets = level_data["targets"]
         self.surfaces = level_data["surfaces"]
         self.powerups = level_data["powerups"]
-        
-        # Add the new entity types if they exist in the level data
         self.gravity_wells = level_data.get("gravity_wells", [])
         self.bounce_pads = level_data.get("bounce_pads", [])
         self.teleporters = level_data.get("teleporters", [])
         
-        # Create the ball at the start position
-        start_x, start_y = level_data["start_pos"]
-        self.ball = Ball(start_x, start_y)
+        # Initialize mastery system tracking for this level
+        self.target_stats = {"hit": 0, "total": len(self.targets)}
+        self.precision_moves = []
         
-        # Set up level parameters
+        # Initialize game state - Use "start_pos" instead of "ball_start"
+        self.ball = Ball(level_data["start_pos"][0], level_data["start_pos"][1])
         self.energy = ENERGY_MAX
         self.score = 0
-        self.time_remaining = level_data.get("time_limit", 60)
-        self.level_start_time = time.time()
-        self.energy_drain = level_data.get("energy_drain", 0)
-        self.background_color = level_data.get("background_color", (20, 20, 30))
-        
-        # Reset force application
+        self.time_remaining = self._get_level_time_limit(level_num)
+        self.level_start_time = pygame.time.get_ticks()
         self.applying_force = False
-        self.force_direction = (0, 0)
-        self.force_magnitude = 0
-
+        
+        # Initialize energy drain from level data
+        self.energy_drain = level_data.get("energy_drain", 0.0)
+        
+        # Store background color from level data
+        self.background_color = level_data.get("background_color", (20, 20, 30))
+    
     def process_events(self) -> bool:
         """
         Process all game events.
@@ -363,8 +394,6 @@ class Game:
             self._update_main_menu()
         elif self.state == GameState.LEVEL_SELECT:
             self._update_level_select()
-        elif self.state == GameState.SETTINGS:
-            self._update_settings()
         elif self.state == GameState.GAME:
             self._update_game()
         elif self.state == GameState.PAUSED:
@@ -831,9 +860,20 @@ class Game:
             self.applying_force = False
     
     def _update_game(self) -> None:
-        """Update the gameplay state."""
-        # Calculate delta time
-        self.dt = self.clock.tick(FPS) / 1000.0
+        """Update the game state."""
+        # Get time delta
+        dt = self.dt
+        
+        # Update time remaining
+        self.time_remaining -= dt
+        
+        # Check if time ran out
+        if self.time_remaining <= 0:
+            self._level_failed()
+            return
+        
+        # Apply visual effects based on mastery rewards
+        self._update_ball_visual_effects()
         
         # Handle time slow effect for star collection
         dt_multiplier = 1.0
@@ -912,6 +952,13 @@ class Game:
         # Update ball physics
         self.ball.update(effective_dt)
         
+        # Update tutorial elements
+        if hasattr(self, 'level_data') and 'tutorial_elements' in self.level_data:
+            for element_data in self.level_data.get('tutorial_elements', []):
+                # Create TutorialElement to update it
+                element = TutorialElement(element_data['type'], element_data)
+                element.update(effective_dt)
+        
         # Update other entities
         # Walls are static and don't need to be updated
         
@@ -973,187 +1020,18 @@ class Game:
             return  # Stop updating once level is complete
     
     def _check_collisions(self) -> None:
-        """Check and handle all collisions."""
-        # Check wall collisions
-        for wall in self.walls:
-            collided = wall.handle_collision(self.ball)
-            if collided:
-                # Play collision sound
-                play_sound("collision", 0.45)  # Increased from 0.3
-                
-                # Calculate impact velocity for effect intensity
-                impact_speed = self.ball.get_speed()
-                particle_count = min(30, int(impact_speed * 3))
-                shake_intensity = min(10, impact_speed * 0.5)
-                
-                # Add hit flash effect for stronger collisions
-                if impact_speed > 5:
-                    # Get the collision point (closest point to the wall)
-                    closest_x = max(wall.rect.left, min(self.ball.x, wall.rect.right))
-                    closest_y = max(wall.rect.top, min(self.ball.y, wall.rect.bottom))
-                    
-                    # Create a quick white flash at collision point (reduced intensity)
-                    flash_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-                    pygame.draw.circle(
-                        flash_surface, 
-                        (255, 255, 255, min(100, int(impact_speed * 10))),  # Reduced from 150 and 15
-                        (int(closest_x), int(closest_y)), 
-                        int(self.ball.radius * 1.2)  # Reduced from 1.5
-                    )
-                    self.screen.blit(flash_surface, (0, 0), special_flags=pygame.BLEND_ADD)
-                
-                # Add particles at collision point
-                if self.settings["particles"]:
-                    self.particle_system.add_explosion(
-                        self.ball.x, self.ball.y,
-                        (255, 255, 255),
-                        count=particle_count + 15,  # Increased particle count
-                        speed=impact_speed * 12,  # Increased speed for more dramatic effect
-                        size_range=(2, 6),  # Slightly larger particles
-                        lifetime_range=(0.3, 0.8),  # Slightly longer lifetime
-                        glow=True
-                    )
-                
-                # Apply screen shake if enabled
-                if self.settings["screen_shake"]:
-                    self._apply_screen_shake(shake_intensity)
-        
-        # Check surface collisions
-        current_friction = FRICTION
-        for surface in self.surfaces:
-            result = surface.handle_collision(self.ball)
-            if result == "deadly":
-                # Ball hit a deadly surface, reset level
-                
-                # Add explosion effect
-                if self.settings["particles"]:
-                    self.particle_system.add_explosion(
-                        self.ball.x, self.ball.y,
-                        (255, 0, 0),  # Red explosion
-                        count=50,
-                        speed=200,
-                        size_range=(3, 8),
-                        lifetime_range=(0.5, 1.0),
-                        glow=True
-                    )
-                
-                # Apply screen shake
-                if self.settings["screen_shake"]:
-                    self._apply_screen_shake(15)
-                
-                # Play sound
-                play_sound("collision", 1.0)
-                
-                # Reset level after a short delay
-                self._setup_level(self.current_level)
-                return
-            elif result:
-                # Apply custom friction from surface
-                current_friction = result
-                
-        # Check target collisions
-        for target in self.targets:
+        """Check for collisions between the ball and other objects."""
+        # Check for collisions with targets
+        for target in self.targets[:]:  # Use copy to safely remove
             if target.handle_collision(self.ball):
                 # Target was hit
                 play_sound("powerup", 0.8)  # Increased volume
                 
+                # Update target hit count for mastery system
+                self.target_stats["hit"] += 1
+                
                 # Add score
                 self.score += target.points
-                
-                # Create a temporary time slow effect for more impact
-                if target.required:
-                    # Slow down time more dramatically for star collection
-                    self.time_slow_effect = 0.2  # Start at 20% speed (more dramatic)
-                    self.time_slow_duration = 0.8  # Duration in seconds (longer)
-                    self.time_slow_timer = 0.0  # Timer to track duration
-                    
-                    # Add screen flash effect
-                    flash_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-                    flash_color = (255, 255, 200, 100)  # Light yellow with alpha
-                    flash_surface.fill(flash_color)
-                    self.screen.blit(flash_surface, (0, 0), special_flags=pygame.BLEND_ADD)
-                
-                # Add particles at target position
-                if self.settings["particles"]:
-                    # More dramatic particle explosion for stars
-                    if target.required:
-                        # Gold explosion for stars
-                        self.particle_system.add_explosion(
-                            target.x, target.y,
-                            (255, 215, 0),  # Gold color
-                            count=60,  # More particles
-                            speed=250,  # Faster particles
-                            size_range=(3, 10),  # Larger particles
-                            lifetime_range=(0.7, 1.8),  # Longer lifetime
-                            glow=True
-                        )
-                        
-                        # Add a secondary ring effect for stars
-                        # Create a ring of particles
-                        num_particles = 24  # More particles in the ring
-                        for i in range(num_particles):
-                            angle = i * (2 * math.pi / num_particles)
-                            vel_x = math.cos(angle) * 150
-                            vel_y = math.sin(angle) * 150
-                            self.particle_system.add_particle(
-                                target.x, target.y,
-                                vel_x, vel_y,
-                                (255, 255, 150),  # Light yellow
-                                4, 1.2, 0, "smooth", True
-                            )
-                        
-                        # Add a third wave of particles that expand outward
-                        for i in range(16):
-                            angle = i * (2 * math.pi / 16) + math.pi/16  # Offset from the first ring
-                            vel_x = math.cos(angle) * 100
-                            vel_y = math.sin(angle) * 100
-                            self.particle_system.add_particle(
-                                target.x, target.y,
-                                vel_x, vel_y,
-                                (255, 200, 100),  # Orange-gold
-                                5, 1.5, 0, "smooth", True
-                            )
-                    else:
-                        # Regular target explosion
-                        self.particle_system.add_explosion(
-                            target.x, target.y,
-                            (255, 100, 100),  # Pink for regular targets
-                            count=20,
-                            speed=150,
-                            size_range=(2, 5),
-                            lifetime_range=(0.5, 1.0),
-                            glow=True
-                        )
-                
-                # Apply screen shake
-                if self.settings["screen_shake"]:
-                    self._apply_screen_shake(12 if target.required else 3)  # More intense shake for stars
-                
-                # Provide a larger energy boost when collecting a star
-                if target.required:
-                    energy_boost = min(ENERGY_MAX * 0.3, ENERGY_MAX - self.energy)  # Boost by 30% of max energy
-                    if energy_boost > 0:
-                        self.energy += energy_boost
-                        
-                        # Show toast for energy boost with more emphasis
-                        self.toasts.append(Toast(f"+{int(energy_boost)} ENERGY!", duration=2.0, position="top"))
-                
-                # Show toast with points
-                self.toasts.append(Toast(f"+{target.points}", duration=1.0, position="top"))
-        
-        # Check powerup collisions
-        for powerup in self.powerups:
-            result = powerup.handle_collision(self.ball)
-            if result:
-                # Powerup was collected
-                play_sound("powerup", 0.7)  # Added volume parameter
-                
-                # Apply powerup effect
-                self._apply_powerup(result)
-                
-                # Add particles at powerup position
-                if self.settings["particles"]:
-                    self._create_powerup_effect(powerup.x, powerup.y, powerup.color)
     
     def _apply_powerup(self, powerup_data: Dict[str, Any]) -> None:
         """Apply the effect of a collected powerup."""
@@ -1221,6 +1099,12 @@ class Game:
         
         # Calculate stars based on time remaining
         stars = self._calculate_stars(self.time_remaining)
+        
+        # Calculate performance scores
+        performance_scores = self._calculate_performance_score()
+        
+        # Update mastery levels based on performance
+        self._update_mastery_levels(performance_scores)
         
         # Update level data
         level_key = str(self.current_level)
@@ -1810,32 +1694,44 @@ class Game:
 
     def _calculate_force(self, keys, mouse_pressed, mouse_pos) -> Tuple[float, float]:
         """Calculate force to apply to the ball based on input."""
-        force_x, force_y = 0, 0
+        force_x = 0
+        force_y = 0
+        old_direction = (force_x, force_y)
         
-        # Keyboard controls
+        # Calculate force direction
         if keys[self.settings["controls"]["up"]]:
-            force_y -= 1
+            force_y = -1
         if keys[self.settings["controls"]["down"]]:
-            force_y += 1
+            force_y = 1
         if keys[self.settings["controls"]["left"]]:
-            force_x -= 1
+            force_x = -1
         if keys[self.settings["controls"]["right"]]:
-            force_x += 1
+            force_x = 1
             
-        # Mouse controls (if enabled)
-        if self.settings.get("mouse_control", False) and mouse_pressed[0]:
-            # Calculate direction from ball to mouse cursor
-            dx = mouse_pos[0] - self.ball.x
-            dy = mouse_pos[1] - self.ball.y
+        # Calculate force direction change for precision tracking
+        new_direction = (force_x, force_y)
+        if old_direction != (0, 0) and new_direction != (0, 0) and old_direction != new_direction:
+            # Calculate dot product to measure direction similarity
+            dot_product = old_direction[0] * new_direction[0] + old_direction[1] * new_direction[1]
+            # Normalize to get value between -1 and 1
+            magnitude1 = math.sqrt(old_direction[0]**2 + old_direction[1]**2)
+            magnitude2 = math.sqrt(new_direction[0]**2 + new_direction[1]**2)
+            if magnitude1 > 0 and magnitude2 > 0:
+                similarity = dot_product / (magnitude1 * magnitude2)
+                self.precision_moves.append(similarity)
+                # Keep precision moves list at reasonable size
+                if len(self.precision_moves) > 50:
+                    self.precision_moves.pop(0)
             
-            # Calculate distance
-            distance = math.sqrt(dx*dx + dy*dy)
+        # Normalize diagonal movement
+        if force_x != 0 and force_y != 0:
+            force_x /= 1.414  # sqrt(2)
+            force_y /= 1.414
             
-            if distance > 0:
-                # Normalize and scale force based on distance
-                force_scale = min(distance / 100, 1.0)  # Max out at a certain distance
-                force_x = dx / distance * force_scale
-                force_y = dy / distance * force_scale
+        # Apply force scale
+        force_scale = 0.5
+        force_x *= force_scale
+        force_y *= force_scale
         
         return force_x, force_y
 
@@ -1843,69 +1739,10 @@ class Game:
         """Draw tutorial elements like arrows and hints."""
         # Check if we have tutorial elements
         if hasattr(self, 'level_data') and self.level_data.get('tutorial_elements'):
-            for element in self.level_data['tutorial_elements']:
-                if element['type'] == 'arrow':
-                    # Draw a directional arrow
-                    start_pos = element['start']
-                    end_pos = element['end']
-                    color = element.get('color', (255, 255, 0))  # Default to yellow
-                    text = element.get('text', '')
-                    
-                    # Calculate arrow properties
-                    arrow_length = math.sqrt((end_pos[0] - start_pos[0])**2 + (end_pos[1] - start_pos[1])**2)
-                    direction_x = (end_pos[0] - start_pos[0]) / arrow_length if arrow_length > 0 else 0
-                    direction_y = (end_pos[1] - start_pos[1]) / arrow_length if arrow_length > 0 else 0
-                    
-                    # Add animation to make it pulsate
-                    pulse = math.sin(pygame.time.get_ticks() * 0.005) * 0.2 + 0.8  # 0.6 to 1.0 scale factor
-                    thickness = int(max(3, 5 * pulse))
-                    
-                    # Draw the line
-                    pygame.draw.line(
-                        surface, 
-                        color, 
-                        start_pos,
-                        (end_pos[0] - direction_x * 20, end_pos[1] - direction_y * 20),  # Cut short for arrowhead
-                        thickness
-                    )
-                    
-                    # Draw the arrowhead
-                    arrow_size = 15 * pulse
-                    angle = math.atan2(direction_y, direction_x)
-                    arr_x1 = end_pos[0] - arrow_size * math.cos(angle - math.pi/6)
-                    arr_y1 = end_pos[1] - arrow_size * math.sin(angle - math.pi/6)
-                    arr_x2 = end_pos[0] - arrow_size * math.cos(angle + math.pi/6)
-                    arr_y2 = end_pos[1] - arrow_size * math.sin(angle + math.pi/6)
-                    
-                    pygame.draw.polygon(
-                        surface,
-                        color,
-                        [(end_pos[0], end_pos[1]), (arr_x1, arr_y1), (arr_x2, arr_y2)]
-                    )
-                    
-                    # Draw the text if present
-                    if text:
-                        text_color = color
-                        text_surface = self.regular_font.render(text, True, text_color)
-                        text_pos = (
-                            (start_pos[0] + end_pos[0]) // 2 - text_surface.get_width() // 2,
-                            (start_pos[1] + end_pos[1]) // 2 - 30  # Offset above the line
-                        )
-                        
-                        # Add a subtle background for better readability
-                        text_bg = pygame.Surface((text_surface.get_width() + 10, text_surface.get_height() + 10))
-                        text_bg.fill((30, 30, 30))
-                        text_bg.set_alpha(150)
-                        surface.blit(text_bg, (text_pos[0] - 5, text_pos[1] - 5))
-                        
-                        # Draw with a slight glow effect
-                        glow_surface = pygame.Surface((text_surface.get_width() + 8, text_surface.get_height() + 8), pygame.SRCALPHA)
-                        glow_text = self.regular_font.render(text, True, (color[0]//2, color[1]//2, color[2]//2))
-                        for offset_x, offset_y in [(0,1), (1,0), (0,-1), (-1,0)]:
-                            glow_surface.blit(glow_text, (4 + offset_x, 4 + offset_y))
-                        
-                        surface.blit(glow_surface, (text_pos[0] - 4, text_pos[1] - 4))
-                        surface.blit(text_surface, text_pos)
+            for element_data in self.level_data['tutorial_elements']:
+                # Create a TutorialElement instance and draw it
+                element = TutorialElement(element_data['type'], element_data)
+                element.draw(surface, self.regular_font)
             
             # Draw hint text if present
             if self.level_data.get('hint'):
@@ -1939,3 +1776,157 @@ class Game:
         
         # Quit pygame
         pygame.quit()
+
+    def _calculate_performance_score(self) -> Dict[str, float]:
+        """
+        Calculate player performance scores across multiple metrics.
+        Returns a dictionary of performance metrics normalized between 0.0 and 1.0.
+        """
+        # Calculate time efficiency
+        time_limit = self._get_level_time_limit(self.current_level)
+        completion_percent = (time_limit - self.time_remaining) / time_limit
+        time_score = min(1.0, max(0.0, 1.0 - completion_percent * 0.8))
+        
+        # Calculate energy efficiency
+        energy_efficiency = 1.0 - (self.energy / ENERGY_MAX)
+        energy_score = min(1.0, max(0.0, energy_efficiency * 0.7))
+        
+        # Calculate precision score based on movement direction changes
+        # A good player makes deliberate, controlled movements with few direction changes
+        if len(self.precision_moves) > 0:
+            unnecessary_changes = sum(1 for change in self.precision_moves if change < 0.3)
+            precision_score = max(0.0, 1.0 - (unnecessary_changes / max(1, len(self.precision_moves))))
+        else:
+            precision_score = 0.0
+            
+        # Calculate target hit ratio
+        if self.target_stats["total"] > 0:
+            target_score = self.target_stats["hit"] / self.target_stats["total"]
+        else:
+            target_score = 0.0
+            
+        return {
+            "time": time_score,
+            "energy": energy_score,
+            "precision": precision_score,
+            "targets": target_score
+        }
+
+    def _update_mastery_levels(self, performance_scores: Dict[str, float]) -> None:
+        """
+        Update mastery levels based on performance scores.
+        """
+        # Update mastery data with exponential moving average
+        alpha = 0.3  # Weight for new score (0-1)
+        for metric, score in performance_scores.items():
+            self.mastery_data[metric] = (alpha * score) + ((1 - alpha) * self.mastery_data[metric])
+        
+        # Update mastery levels based on thresholds
+        for metric in MASTERY_METRICS:
+            score = self.mastery_data[metric]
+            thresholds = MASTERY_THRESHOLDS[metric]
+            
+            # Determine level based on thresholds
+            level = 0
+            for i, threshold in enumerate(thresholds):
+                if score >= threshold:
+                    level = i + 1
+            
+            # If player reached a new mastery level
+            if level > self.mastery_levels[metric]:
+                self.mastery_levels[metric] = level
+                # Activate reward for this metric
+                self.active_rewards[metric] = MASTERY_REWARDS[metric][level-1]
+                # Show toast notification
+                metric_name = metric.capitalize()
+                level_name = MASTERY_LEVELS[level-1].capitalize()
+                self.toasts.append(Toast(f"{metric_name} Mastery: {level_name}!", duration=2.5, text_color=YELLOW))
+                
+        # Save mastery data with level data
+        self._save_mastery_data()
+
+    def _save_mastery_data(self) -> None:
+        """Save mastery data to the levels file."""
+        if "mastery" not in self.levels_data:
+            self.levels_data["mastery"] = {}
+            
+        self.levels_data["mastery"] = {
+            "data": self.mastery_data,
+            "levels": self.mastery_levels,
+            "rewards": self.active_rewards
+        }
+        
+        self._save_levels_data()
+
+    def _update_ball_visual_effects(self) -> None:
+        """Update ball visual effects based on active mastery rewards."""
+        if not self.ball:
+            return
+            
+        # Apply time mastery rewards (trails)
+        time_reward = self.active_rewards.get("time")
+        if time_reward:
+            # Set trail color based on reward
+            if time_reward == "blue_trail":
+                self.ball.trail_color = BLUE
+                self.ball.trail_enabled = True
+            elif time_reward == "cyan_trail":
+                self.ball.trail_color = CYAN
+                self.ball.trail_enabled = True
+            elif time_reward == "white_trail":
+                self.ball.trail_color = WHITE
+                self.ball.trail_enabled = True
+            elif time_reward == "rainbow_trail":
+                # Rainbow trail cycles through colors
+                hue = (pygame.time.get_ticks() % 3000) / 3000
+                r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+                self.ball.trail_color = (int(r * 255), int(g * 255), int(b * 255))
+                self.ball.trail_enabled = True
+        
+        # Apply energy mastery rewards (glows)
+        energy_reward = self.active_rewards.get("energy")
+        if energy_reward:
+            # Set glow intensity based on reward
+            if energy_reward == "small_glow":
+                self.ball.glow_radius = 15
+                self.ball.glow_color = (255, 255, 150, 80)
+            elif energy_reward == "medium_glow":
+                self.ball.glow_radius = 25
+                self.ball.glow_color = (255, 255, 150, 100)
+            elif energy_reward == "large_glow":
+                self.ball.glow_radius = 35
+                self.ball.glow_color = (255, 255, 150, 120)
+            elif energy_reward == "energy_aura":
+                # Pulsing energy aura
+                pulse = (math.sin(pygame.time.get_ticks() / 200) + 1) / 2
+                self.ball.glow_radius = 25 + int(pulse * 15)
+                self.ball.glow_color = (255, 255, 100, int(100 + pulse * 50))
+        
+        # Apply precision mastery rewards (impact sparks)
+        precision_reward = self.active_rewards.get("precision")
+        if precision_reward:
+            self.ball.collision_particle_color = {
+                "bronze_spark": (205, 127, 50),
+                "silver_spark": (192, 192, 192),
+                "gold_spark": (255, 215, 0),
+                "diamond_spark": (185, 242, 255)
+            }.get(precision_reward, (255, 255, 255))
+            
+            self.ball.collision_particles_enabled = True
+            
+        # Apply target hit mastery rewards (pulse effects)
+        target_reward = self.active_rewards.get("targets")
+        if target_reward:
+            # Set pulse color and strength based on reward
+            if target_reward == "green_pulse":
+                self.ball.pulse_color = GREEN
+                self.ball.pulse_strength = 1.5
+            elif target_reward == "yellow_pulse":
+                self.ball.pulse_color = YELLOW
+                self.ball.pulse_strength = 2.0
+            elif target_reward == "orange_pulse":
+                self.ball.pulse_color = ORANGE
+                self.ball.pulse_strength = 2.5
+            elif target_reward == "red_pulse":
+                self.ball.pulse_color = RED
+                self.ball.pulse_strength = 3.0
