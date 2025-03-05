@@ -63,49 +63,86 @@ class Particle:
             self.size = self.original_size * (life_ratio ** 3)
     
     def draw(self, surface):
-        """Draw the particle on the given surface."""
-        # Calculate alpha based on remaining lifetime and fade mode
-        life_ratio = 1 - (self.age / self.lifetime)
-        
+        """Draw the particle."""
+        # Calculate opacity based on age and fade mode
         if self.fade_mode == "linear":
-            alpha = int(255 * life_ratio)
+            # Simple linear fade from 1.0 to 0.0
+            alpha = 255 * (1 - (self.age / self.lifetime))
         elif self.fade_mode == "smooth":
-            alpha = int(255 * (math.sin(life_ratio * math.pi / 2)))
+            # Smoother fade that holds stronger in the middle
+            progress = self.age / self.lifetime
+            alpha = 255 * (1 - progress * progress)
         elif self.fade_mode == "late":
-            alpha = int(255 * (life_ratio ** 0.3))
+            # Maintain opacity and fade quickly at the end
+            progress = self.age / self.lifetime
+            alpha = 255 * (1 - (progress * progress * progress))
         elif self.fade_mode == "early":
-            alpha = int(255 * (life_ratio ** 3))
+            # Fade quickly at the start
+            progress = self.age / self.lifetime
+            alpha = 255 * (1 - math.sqrt(progress))
         else:
-            alpha = int(255 * life_ratio)
+            alpha = 255
+            
+        alpha = max(0, min(255, int(alpha)))
         
+        # Calculate current size (may shrink over time)
+        current_size = self.original_size * (1 - 0.5 * (self.age / self.lifetime))
+        
+        # Enhanced glow effect for particles
+        if self.glow:
+            # Create a larger surface for the glow with per-pixel alpha
+            glow_size = current_size * 3  # Larger glow radius
+            glow_surf = pygame.Surface((int(glow_size * 2), int(glow_size * 2)), pygame.SRCALPHA)
+            
+            # Create a more dynamic glow using multiple circles with decreasing alpha
+            for r in range(int(glow_size), 0, -2):
+                # Calculate alpha based on radius and particle age
+                glow_alpha = int(alpha * 0.7 * (r / glow_size))
+                
+                # Create a slight color shift for outer glow
+                glow_color = list(self.color)
+                if len(glow_color) == 3:
+                    glow_color.append(0)  # Add alpha channel if needed
+                
+                # Make outer glow slightly different color for a nicer effect
+                if r > glow_size * 0.7:
+                    glow_color[0] = min(255, int(glow_color[0] * 0.8))
+                    glow_color[1] = min(255, int(glow_color[1] * 0.8))
+                    glow_color[2] = min(255, int(glow_color[2] * 1.2))
+                
+                glow_color[3] = glow_alpha
+                
+                pygame.draw.circle(
+                    glow_surf, 
+                    tuple(glow_color), 
+                    (int(glow_size), int(glow_size)), 
+                    r
+                )
+            
+            # Blit the glow surface
+            surface.blit(
+                glow_surf, 
+                (int(self.x - glow_size), int(self.y - glow_size)), 
+                special_flags=pygame.BLEND_ADD
+            )
+        
+        # Draw the main particle
         # Create a surface with per-pixel alpha
-        size_int = max(1, int(self.size * 2))
+        size_int = max(1, int(current_size * 2))
         particle_surf = pygame.Surface((size_int, size_int), pygame.SRCALPHA)
         
         # Draw the particle
-        if self.glow:
-            # Draw with a glow effect (multiple circles with decreasing alpha)
-            for r in range(int(self.size), 0, -1):
-                glow_alpha = int(alpha * (r / self.size))
-                pygame.draw.circle(
-                    particle_surf,
-                    (*self.color[:3], glow_alpha),
-                    (int(self.size), int(self.size)),
-                    r
-                )
-        else:
-            # Standard circle
-            pygame.draw.circle(
-                particle_surf,
-                (*self.color[:3], alpha),
-                (int(self.size), int(self.size)),
-                int(self.size)
-            )
+        pygame.draw.circle(
+            particle_surf,
+            (*self.color[:3], alpha),
+            (int(current_size), int(current_size)),
+            int(current_size)
+        )
         
         # Blit the particle surface onto the main surface
         surface.blit(
             particle_surf,
-            (int(self.x - self.size), int(self.y - self.size))
+            (int(self.x - current_size), int(self.y - current_size))
         )
 
 class ParticleSystem:
@@ -272,4 +309,46 @@ class ParticleSystem:
     
     def clear(self):
         """Clear all particles from the system."""
-        self.particles = [] 
+        self.particles = []
+    
+    def add_spiral_burst(self, x, y, color=(255, 150, 50), spiral_count=3, particles_per_spiral=12, 
+                      radius=100, rotation_speed=10, lifetime=1.5):
+        """Add a spiral burst of particles emanating from a point."""
+        for spiral in range(spiral_count):
+            # Each spiral starts at a different angle
+            start_angle = (2 * math.pi / spiral_count) * spiral
+            
+            for i in range(particles_per_spiral):
+                # Calculate delay based on position in spiral
+                delay_factor = i / particles_per_spiral
+                
+                # Calculate spiral parameters
+                angle = start_angle + (delay_factor * 2 * math.pi)
+                distance = radius * delay_factor
+                
+                # Position along the spiral
+                px = x + math.cos(angle) * distance
+                py = y + math.sin(angle) * distance
+                
+                # Velocity - tangential to the spiral
+                tangent_angle = angle + math.pi/2
+                speed = 50 + (150 * (1 - delay_factor))  # Faster at center, slower at edge
+                vel_x = math.cos(tangent_angle) * speed
+                vel_y = math.sin(tangent_angle) * speed
+                
+                # Make color unique for each spiral
+                hue_shift = spiral * 0.3  # Shift hue for each spiral
+                r = min(255, int(color[0] * (1 - hue_shift) + 50 * hue_shift))
+                g = min(255, int(color[1] * (1 - hue_shift) + 100 * hue_shift))
+                b = min(255, int(color[2] * (1 - hue_shift) + 200 * hue_shift))
+                
+                # Create the particle
+                size = 3 + (2 * (1 - delay_factor))  # Larger particles near center
+                self.add_particle(
+                    px, py, vel_x, vel_y, 
+                    (r, g, b), size, 
+                    lifetime * (0.5 + (0.5 * delay_factor)),  # Longer lifetime for outer particles
+                    0, "smooth", True, 
+                    random.uniform(0, math.pi * 2),  # Random rotation
+                    rotation_speed * (1 - delay_factor)  # Faster rotation near center
+                ) 

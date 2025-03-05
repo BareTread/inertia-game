@@ -934,7 +934,18 @@ class Game:
                 self._apply_screen_shake(0.7)
         
         # Update powerup effects
-        # ... existing powerup effect code ...
+        for powerup in self.powerups:
+            result = powerup.handle_collision(self.ball)
+            if result:
+                # Powerup was collected
+                play_sound("powerup")
+                
+                # Apply powerup effect
+                self._apply_powerup(result)
+                
+                # Add particles at powerup position
+                if self.settings["particles"]:
+                    self._create_powerup_effect(powerup.x, powerup.y, powerup.color)
         
         # Check collisions
         self._check_collisions()
@@ -1133,10 +1144,7 @@ class Game:
                 
                 # Add particles at powerup position
                 if self.settings["particles"]:
-                    self.particle_system.add_energy_burst(
-                        powerup.x, powerup.y,
-                        color=powerup.color
-                    )
+                    self._create_powerup_effect(powerup.x, powerup.y, powerup.color)
     
     def _apply_powerup(self, powerup_data: Dict[str, Any]) -> None:
         """Apply the effect of a collected powerup."""
@@ -1156,6 +1164,28 @@ class Game:
             # Add time
             self.time_remaining += value
             self.toasts.append(Toast(f"+{value} Seconds", duration=1.5, position="top"))
+    
+    def _create_powerup_effect(self, x: float, y: float, color: Tuple[int, int, int]) -> None:
+        """Create an enhanced visual effect when collecting a powerup."""
+        # Add spiral burst effect for a more satisfying visual
+        self.particle_system.add_spiral_burst(
+            x, y,
+            color=color,
+            spiral_count=3,
+            particles_per_spiral=10,
+            radius=70,
+            lifetime=1.2
+        )
+        
+        # Also add the original energy burst for extra effect
+        self.particle_system.add_energy_burst(
+            x, y,
+            color=color
+        )
+        
+        # Apply screen shake for better feedback
+        if self.settings["screen_shake"]:
+            self._apply_screen_shake(5)
     
     def _check_level_complete(self) -> bool:
         """Check if all required targets have been hit."""
