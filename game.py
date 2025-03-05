@@ -1021,6 +1021,29 @@ class Game:
     
     def _check_collisions(self) -> None:
         """Check for collisions between the ball and other objects."""
+        # Check for collisions with walls
+        for wall in self.walls:
+            if wall.handle_collision(self.ball):
+                # Play collision sound
+                impact_speed = self.ball.get_speed()
+                play_sound("collision", 0.45)
+                
+                # Add particles based on impact speed (if enabled)
+                if self.settings["particles"] and impact_speed > 50:
+                    self.particle_system.add_explosion(
+                        self.ball.x, self.ball.y,
+                        count=int(5 + impact_speed / 30), 
+                        speed=impact_speed * 0.12,
+                        size_range=(2, 6),
+                        lifetime_range=(0.3, 0.8),
+                        glow=True
+                    )
+                
+                # Apply screen shake based on impact speed
+                if self.settings["screen_shake"] and impact_speed > 150:
+                    shake_intensity = min(impact_speed / 200, 3.0)
+                    self._apply_screen_shake(shake_intensity * 1.3)
+        
         # Check for collisions with targets
         for target in self.targets[:]:  # Use copy to safely remove
             if target.handle_collision(self.ball):

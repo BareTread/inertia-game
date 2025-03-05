@@ -60,52 +60,94 @@ class TutorialElement:
         direction_y = (end_pos[1] - start_pos[1]) / arrow_length if arrow_length > 0 else 0
         
         # Add animation to make it pulsate
-        pulse = math.sin(pygame.time.get_ticks() * self.pulse_speed) * 0.2 + 0.8  # 0.6 to 1.0 scale factor
-        thickness = int(max(3, 5 * pulse))
+        pulse = math.sin(pygame.time.get_ticks() * self.pulse_speed) * 0.15 + 0.85  # 0.7 to 1.0 scale factor
+        thickness = int(max(2, 4 * pulse))
         
-        # Draw the line
-        pygame.draw.line(
-            surface, 
-            color, 
-            start_pos,
-            (end_pos[0] - direction_x * 20, end_pos[1] - direction_y * 20),  # Cut short for arrowhead
-            thickness
-        )
+        # Create a smoother, more elegant arrow
+        # Draw the main line with a gradient effect
+        steps = 8
+        for i in range(steps):
+            progress = i / steps
+            alpha = int(255 * (1 - progress) * pulse)
+            current_color = (*color[:3], alpha)
+            current_thickness = max(1, int(thickness * (1 - progress * 0.7)))
+            
+            # Draw line segment with decreasing thickness
+            segment_start = (
+                start_pos[0] + progress * (end_pos[0] - start_pos[0]) * 0.05,
+                start_pos[1] + progress * (end_pos[1] - start_pos[1]) * 0.05
+            )
+            segment_end = (
+                end_pos[0] - direction_x * 20 - (1 - progress) * (end_pos[0] - start_pos[0]) * 0.05,
+                end_pos[1] - direction_y * 20 - (1 - progress) * (end_pos[1] - start_pos[1]) * 0.05
+            )
+            
+            pygame.draw.line(
+                surface, 
+                current_color, 
+                segment_start,
+                segment_end,
+                current_thickness
+            )
         
-        # Draw the arrowhead
-        arrow_size = 15 * pulse
+        # Draw an improved arrowhead - larger and more visible
+        arrow_size = 18 * pulse
         angle = math.atan2(direction_y, direction_x)
-        arr_x1 = end_pos[0] - arrow_size * math.cos(angle - math.pi/6)
-        arr_y1 = end_pos[1] - arrow_size * math.sin(angle - math.pi/6)
-        arr_x2 = end_pos[0] - arrow_size * math.cos(angle + math.pi/6)
-        arr_y2 = end_pos[1] - arrow_size * math.sin(angle + math.pi/6)
         
+        # Calculate points for a better arrow shape
+        arr_x1 = end_pos[0] - arrow_size * math.cos(angle - math.pi/7)
+        arr_y1 = end_pos[1] - arrow_size * math.sin(angle - math.pi/7)
+        arr_x2 = end_pos[0] - arrow_size * 0.7 * math.cos(angle)
+        arr_y2 = end_pos[1] - arrow_size * 0.7 * math.sin(angle)
+        arr_x3 = end_pos[0] - arrow_size * math.cos(angle + math.pi/7)
+        arr_y3 = end_pos[1] - arrow_size * math.sin(angle + math.pi/7)
+        
+        # Draw arrowhead
         pygame.draw.polygon(
             surface,
             color,
-            [(end_pos[0], end_pos[1]), (arr_x1, arr_y1), (arr_x2, arr_y2)]
+            [(end_pos[0], end_pos[1]), (arr_x1, arr_y1), (arr_x2, arr_y2), (arr_x3, arr_y3)]
         )
         
         # Draw the text if present
         if text:
-            text_color = color
-            text_surface = font.render(text, True, text_color)
-            text_pos = (
-                (start_pos[0] + end_pos[0]) // 2 - text_surface.get_width() // 2,
-                (start_pos[1] + end_pos[1]) // 2 - 30  # Offset above the line
+            # Calculate an appropriate position
+            text_pos_x = (start_pos[0] + end_pos[0]) // 2
+            text_pos_y = (start_pos[1] + end_pos[1]) // 2 - 25  # Position above the line
+            
+            # Create a better text style
+            text_shadow = font.render(text, True, (0, 0, 0))
+            text_surface = font.render(text, True, color)
+            
+            # Add a semi-transparent background panel
+            text_width = text_surface.get_width()
+            text_height = text_surface.get_height()
+            padding = 8
+            
+            # Create panel with rounded corners
+            panel = pygame.Surface((text_width + padding*2, text_height + padding*2), pygame.SRCALPHA)
+            pygame.draw.rect(
+                panel, 
+                (0, 0, 0, 180),
+                (0, 0, text_width + padding*2, text_height + padding*2),
+                border_radius=10
             )
             
-            # Add a subtle background for better readability
-            text_bg = pygame.Surface((text_surface.get_width() + 10, text_surface.get_height() + 10))
-            text_bg.fill((30, 30, 30))
-            text_bg.set_alpha(150)
-            surface.blit(text_bg, (text_pos[0] - 5, text_pos[1] - 5))
+            # Add subtle border highlight
+            pygame.draw.rect(
+                panel, 
+                (*color[:3], 100),
+                (0, 0, text_width + padding*2, text_height + padding*2),
+                width=2,
+                border_radius=10
+            )
+            
+            # Position everything
+            panel_pos = (text_pos_x - text_width//2 - padding, text_pos_y - padding)
+            text_shadow_pos = (text_pos_x - text_width//2 + 2, text_pos_y + 2)
+            text_pos = (text_pos_x - text_width//2, text_pos_y)
             
             # Draw with a slight glow effect
-            glow_surface = pygame.Surface((text_surface.get_width() + 8, text_surface.get_height() + 8), pygame.SRCALPHA)
-            glow_text = font.render(text, True, (color[0]//2, color[1]//2, color[2]//2))
-            for offset_x, offset_y in [(0,1), (1,0), (0,-1), (-1,0)]:
-                glow_surface.blit(glow_text, (4 + offset_x, 4 + offset_y))
-            
-            surface.blit(glow_surface, (text_pos[0] - 4, text_pos[1] - 4))
+            surface.blit(panel, panel_pos)
+            surface.blit(text_shadow, text_shadow_pos)
             surface.blit(text_surface, text_pos) 
