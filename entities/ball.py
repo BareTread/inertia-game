@@ -25,8 +25,15 @@ class Ball:
         
     def apply_force(self, force_x, force_y):
         """Apply a force to the ball, changing its velocity."""
-        self.vel_x += force_x
-        self.vel_y += force_y
+        # Add "weight" to movement for better feel
+        force_multiplier = 1.2  # Slightly increase force impact
+        self.vel_x += force_x * force_multiplier
+        self.vel_y += force_y * force_multiplier
+        
+        # Add subtle "boost" effect when starting from standstill
+        if abs(self.vel_x) < 0.1 and abs(self.vel_y) < 0.1:
+            self.vel_x += force_x * 0.3  # Extra initial push
+            self.vel_y += force_y * 0.3
         
     def update(self, dt, friction=0.99):
         """Update the ball's position and animation."""

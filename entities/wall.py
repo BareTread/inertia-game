@@ -46,8 +46,13 @@ class Wall:
             
             # Bounce (with some energy loss)
             dot_product = ball.vel_x * norm_x + ball.vel_y * norm_y
-            ball.vel_x -= 1.8 * dot_product * norm_x  # 1.8 makes it more bouncy like in original game
-            ball.vel_y -= 1.8 * dot_product * norm_y
+            
+            # Improve bounce feel with better energy conservation
+            bounce_factor = 1.5  # Decrease from 1.8 for more controlled bounces
+            energy_preservation = 0.85 + (ball.get_speed() * 0.01)  # Speed-based energy preservation
+            
+            ball.vel_x -= bounce_factor * dot_product * norm_x * energy_preservation
+            ball.vel_y -= bounce_factor * dot_product * norm_y * energy_preservation
             
             return True
         

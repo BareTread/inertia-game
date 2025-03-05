@@ -966,6 +966,22 @@ class Game:
                 particle_count = min(30, int(impact_speed * 3))
                 shake_intensity = min(10, impact_speed * 0.5)
                 
+                # Add hit flash effect for stronger collisions
+                if impact_speed > 5:
+                    # Get the collision point (closest point to the wall)
+                    closest_x = max(wall.rect.left, min(self.ball.x, wall.rect.right))
+                    closest_y = max(wall.rect.top, min(self.ball.y, wall.rect.bottom))
+                    
+                    # Create a quick white flash at collision point
+                    flash_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+                    pygame.draw.circle(
+                        flash_surface, 
+                        (255, 255, 255, min(150, int(impact_speed * 15))),
+                        (int(closest_x), int(closest_y)), 
+                        int(self.ball.radius * 1.5)
+                    )
+                    self.screen.blit(flash_surface, (0, 0), special_flags=pygame.BLEND_ADD)
+                
                 # Add particles at collision point
                 if self.settings["particles"]:
                     self.particle_system.add_explosion(
@@ -1317,6 +1333,16 @@ class Game:
             if magnitude > 0:
                 norm_x /= magnitude
                 norm_y /= magnitude
+                
+            # Draw thicker initial line segment
+            segment_length = line_length / 12  # 12 segments
+            pygame.draw.line(
+                game_surface,
+                (255, 255, 0),  # Bright yellow
+                (int(self.ball.x), int(self.ball.y)),
+                (int(self.ball.x + norm_x * segment_length * 2), int(self.ball.y + norm_y * segment_length * 2)),
+                max(4, int(self.force_magnitude * 2))  # Thicker line based on force
+            )
             
             # Draw dotted trajectory line with segments
             segments = 12  # Number of segments
