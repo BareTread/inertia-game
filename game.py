@@ -77,6 +77,7 @@ class Game:
         # Initialize game state
         self.state = GameState.MAIN_MENU
         self.previous_state = None
+        self.paused = False  # Initialize paused attribute
         
         # Game objects
         self.ball = None
@@ -271,11 +272,18 @@ class Game:
         )
 
     def _change_state(self, new_state: GameState) -> None:
-        """Change the current game state and set up the new state."""
-        # Set the new state
+        """Change the game state."""
+        # Handle special transitions
+        if new_state == GameState.PAUSED:
+            self.paused = True
+            self._setup_pause_menu()
+        elif self.state == GameState.PAUSED and new_state == GameState.GAME:
+            self.paused = False
+            
+        # Update state
         self.state = new_state
         
-        # Set up the new state
+        # Handle state-specific setups
         if new_state == GameState.MAIN_MENU:
             self._setup_main_menu()
         elif new_state == GameState.LEVEL_SELECT:
@@ -284,8 +292,6 @@ class Game:
             self._setup_settings()
         elif new_state == GameState.GAME:
             self._setup_game()
-        elif new_state == GameState.PAUSED:
-            self._setup_pause_menu()
         elif new_state == GameState.LEVEL_COMPLETE:
             self._setup_level_complete()
     
@@ -351,6 +357,75 @@ class Game:
         
         # Store background color from level data
         self.background_color = level_data.get("background_color", (20, 20, 30))
+        
+        # Initialize ball personality
+        self._implement_ball_personality()
+    
+    def _implement_ball_personality(self) -> None:
+        """Give the ball subtle personality to create emotional attachment."""
+        # Create ball personality if it doesn't exist
+        if not hasattr(self, "ball_personality"):
+            self.ball_personality = BallPersonality(
+                adapts_to_player_style=True,
+                remembers_past_attempts=True,
+                shows_subtle_emotions=True
+            )
+        
+        # Define the ball's expressions
+        self.ball_expressions = {
+            "determined": lambda: self._adjust_ball_appearance("focused"),
+            "excited": lambda: self._adjust_ball_appearance("energetic"),
+            "struggling": lambda: self._adjust_ball_appearance("strained")
+        }
+        
+        # Define emotion triggers
+        self.emotion_triggers = {
+            "near_miss": lambda: self._trigger_emotion("determined"),
+            "long_airtime": lambda: self._trigger_emotion("excited"),
+            "repeated_failures": lambda: self._trigger_emotion("struggling")
+        }
+    
+    def _adjust_ball_appearance(self, mood: str) -> None:
+        """Adjust the ball's appearance based on mood."""
+        if mood == "focused":
+            self.ball.base_color = (220, 220, 255)  # Slightly blue tint
+            self.ball.pulse_strength = 1.5
+        elif mood == "energetic":
+            self.ball.base_color = (255, 255, 220)  # Slightly yellow tint
+            self.ball.pulse_strength = 2.0
+        elif mood == "strained":
+            self.ball.base_color = (255, 220, 220)  # Slightly red tint
+            self.ball.pulse_strength = 1.0
+        else:
+            # Reset to default
+            self.ball.base_color = (255, 255, 255)
+            self.ball.pulse_strength = 1.0
+    
+    def _trigger_emotion(self, emotion: str) -> None:
+        """Trigger an emotional state in the ball."""
+        if emotion in self.ball_expressions:
+            self.ball_personality.current_emotion = emotion
+            self.ball_expressions[emotion]()
+            
+            # Update personality state
+            game_state = {
+                "speed": self.ball.get_speed(),
+                "collision_count": getattr(self, "collision_count", 0),
+                "near_target": any(self._is_near_target(target) for target in self.targets),
+                "recent_success": self.target_stats.get("hit", 0) > self.target_stats.get("previous_hit", 0)
+            }
+            self.ball_personality.update(game_state)
+            
+            # Update previous hit count
+            self.target_stats["previous_hit"] = self.target_stats.get("hit", 0)
+    
+    def _is_near_target(self, target) -> bool:
+        """Check if the ball is near a target but not hitting it."""
+        if not hasattr(target, "x") or not hasattr(target, "y") or not hasattr(target, "radius"):
+            return False
+            
+        distance = ((self.ball.x - target.x)**2 + (self.ball.y - target.y)**2)**0.5
+        return distance < target.radius * 3 and distance > target.radius
     
     def process_events(self) -> bool:
         """
@@ -830,6 +905,7 @@ class Game:
         if event.type == pygame.KEYDOWN:
             # Pause game
             if event.key == self.settings["controls"]["pause"]:
+                self.paused = True  # Explicitly set paused attribute
                 self._change_state(GameState.PAUSED)
             
             # Reset level
@@ -860,17 +936,26 @@ class Game:
             self.applying_force = False
     
     def _update_game(self) -> None:
-        """Update the game state."""
-        # Get time delta
-        dt = self.dt
-        
-        # Update time remaining
-        self.time_remaining -= dt
-        
-        # Check if time ran out
-        if self.time_remaining <= 0:
-            self._level_failed()
-            return
+        """Update game state."""
+        # Only update if not paused
+        is_paused = getattr(self, "paused", False)  # Get paused attribute or default to False
+        if not is_paused:
+            # Update game time
+            self.time_remaining -= self.dt
+            
+            # Track flow state for enhanced gameplay
+            self._track_flow_state()
+            
+            # Check for level timeout
+            if self.time_remaining <= 0:
+                self._level_failed()
+                return
+            
+            # Apply time dilation to physics updates if in flow state
+            effective_dt = self.dt * self.time_dilation_factor if hasattr(self, "time_dilation_factor") else self.dt
+            
+            # Update ball position
+            self.ball.update(effective_dt)
         
         # Apply visual effects based on mastery rewards
         self._update_ball_visual_effects()
@@ -949,9 +1034,6 @@ class Game:
         if self.energy_drain > 0:
             self.energy = max(0, self.energy - self.energy_drain * effective_dt)
         
-        # Update ball physics
-        self.ball.update(effective_dt)
-        
         # Update tutorial elements
         if hasattr(self, 'level_data') and 'tutorial_elements' in self.level_data:
             for element_data in self.level_data.get('tutorial_elements', []):
@@ -1021,9 +1103,19 @@ class Game:
     
     def _check_collisions(self) -> None:
         """Check for collisions between the ball and other objects."""
+        # Initialize collision counter for this frame if not exists
+        if not hasattr(self, "collision_count"):
+            self.collision_count = 0
+        
+        # Reset collision counter each frame
+        self.collision_count = 0
+        
         # Check for collisions with walls
         for wall in self.walls:
             if wall.handle_collision(self.ball):
+                # Increment collision counter
+                self.collision_count += 1
+                
                 # Play collision sound
                 impact_speed = self.ball.get_speed()
                 play_sound("collision", 0.45)
@@ -1044,6 +1136,12 @@ class Game:
                 if self.settings["screen_shake"] and impact_speed > 150:
                     shake_intensity = min(impact_speed / 200, 3.0)
                     self._apply_screen_shake(shake_intensity * 1.3)
+                
+                # Trigger ball emotion based on collision intensity
+                if impact_speed > 300:
+                    self.emotion_triggers["long_airtime"]()
+                elif self.collision_count > 3:
+                    self.emotion_triggers["repeated_failures"]()
         
         # Check for collisions with targets
         for target in self.targets[:]:  # Use copy to safely remove
@@ -1056,6 +1154,12 @@ class Game:
                 
                 # Add score
                 self.score += target.points
+                
+                # Trigger excited emotion on successful target hit
+                self.emotion_triggers["long_airtime"]()
+            elif self._is_near_target(target):
+                # Near miss with target
+                self.emotion_triggers["near_miss"]()
     
     def _apply_powerup(self, powerup_data: Dict[str, Any]) -> None:
         """Apply the effect of a collected powerup."""
@@ -1504,7 +1608,7 @@ class Game:
             button_width, button_height,
             "Resume",
             self.regular_font,
-            callback=lambda: self._change_state(GameState.GAME)
+            callback=lambda: self._resume_game()
         )
         
         # Restart button
@@ -1525,6 +1629,11 @@ class Game:
             callback=lambda: self._change_state(GameState.MAIN_MENU)
         )
     
+    def _resume_game(self) -> None:
+        """Resume the game from pause state."""
+        self.paused = False
+        self._change_state(GameState.GAME)
+    
     def _process_pause_events(self, event: pygame.event.Event, mouse_pos: Tuple[int, int], 
                               mouse_pressed: Tuple[bool, bool, bool]) -> None:
         """Process events for the pause menu."""
@@ -1535,7 +1644,7 @@ class Game:
         # Handle keyboard shortcuts
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE or event.key == self.settings["controls"]["pause"]:
-                self._change_state(GameState.GAME)
+                self._resume_game()
     
     def _update_pause_menu(self) -> None:
         """Update the pause menu."""
@@ -1963,3 +2072,188 @@ class Game:
             elif target_reward == "red_pulse":
                 self.ball.pulse_color = RED
                 self.ball.pulse_strength = 3.0
+
+    def _track_flow_state(self) -> None:
+        """Track player's flow state to dynamically enhance the experience."""
+        # Initialize flow state attributes if they don't exist
+        if not hasattr(self, "flow_score"):
+            self.flow_score = 0.0
+            self.time_dilation_factor = 1.0
+            self.camera_zoom = 1.0
+        
+        # Calculate flow indicators
+        movement_efficiency = self._calculate_path_efficiency()
+        consecutive_targets = sum(1 for t in self.targets if hasattr(t, 'hit') and t.hit) / max(1, len(self.targets))
+        velocity_control = self._calculate_velocity_control_ratio()
+        
+        # Compound flow score (0.0-1.0)
+        self.flow_score = (movement_efficiency * 0.4 + 
+                          consecutive_targets * 0.4 + 
+                          velocity_control * 0.2)
+        
+        # Apply subtle enhancements when in flow
+        if self.flow_score > 0.7:
+            # Dynamic time dilation - slow down slightly during critical moments
+            if self.ball.get_speed() > 300:
+                self.time_dilation_factor = 0.8
+            else:
+                self.time_dilation_factor = 1.0
+            
+            # Enhanced trail effects
+            self.ball.max_trail_length = 25
+            self.ball.trail_color_intensity = 1.4
+            
+            # Camera subtly zooms to follow intense action
+            self.camera_zoom = min(1.2, self.camera_zoom + 0.01)
+        else:
+            # Reset enhancements when not in flow
+            self.time_dilation_factor = 1.0
+            self.ball.max_trail_length = 10  # Default value
+            self.ball.trail_color_intensity = 1.0
+            self.camera_zoom = max(1.0, self.camera_zoom - 0.01)
+    
+    def _calculate_path_efficiency(self) -> float:
+        """Calculate how efficiently the player is moving through the level."""
+        # Simple implementation - can be expanded
+        if not hasattr(self, "previous_positions"):
+            self.previous_positions = []
+        
+        # Record position
+        self.previous_positions.append((self.ball.x, self.ball.y))
+        
+        # Keep only recent positions
+        max_positions = 100
+        if len(self.previous_positions) > max_positions:
+            self.previous_positions = self.previous_positions[-max_positions:]
+        
+        # If we don't have enough positions yet, return moderate efficiency
+        if len(self.previous_positions) < 20:
+            return 0.5
+        
+        # Calculate direct distance from start to current
+        start_pos = self.previous_positions[0]
+        current_pos = self.previous_positions[-1]
+        direct_distance = ((current_pos[0] - start_pos[0])**2 + 
+                          (current_pos[1] - start_pos[1])**2)**0.5
+        
+        # Calculate actual path distance
+        path_distance = 0
+        for i in range(1, len(self.previous_positions)):
+            prev = self.previous_positions[i-1]
+            curr = self.previous_positions[i]
+            segment_distance = ((curr[0] - prev[0])**2 + (curr[1] - prev[1])**2)**0.5
+            path_distance += segment_distance
+        
+        # Calculate efficiency ratio (direct / path)
+        if path_distance > 0:
+            efficiency = min(1.0, direct_distance / path_distance)
+        else:
+            efficiency = 0.5
+        
+        return efficiency
+    
+    def _calculate_velocity_control_ratio(self) -> float:
+        """Calculate how well the player is controlling velocity."""
+        # Simple implementation - can be expanded
+        if not hasattr(self, "velocity_samples"):
+            self.velocity_samples = []
+        
+        # Record current velocity
+        current_velocity = (self.ball.vel_x, self.ball.vel_y)
+        speed = (current_velocity[0]**2 + current_velocity[1]**2)**0.5
+        self.velocity_samples.append(speed)
+        
+        # Keep only recent samples
+        max_samples = 30
+        if len(self.velocity_samples) > max_samples:
+            self.velocity_samples = self.velocity_samples[-max_samples:]
+        
+        # If we don't have enough samples yet, return moderate control
+        if len(self.velocity_samples) < 10:
+            return 0.5
+        
+        # Calculate velocity variance (lower variance = better control)
+        avg_speed = sum(self.velocity_samples) / len(self.velocity_samples)
+        variance = sum((s - avg_speed)**2 for s in self.velocity_samples) / len(self.velocity_samples)
+        
+        # Convert to a 0-1 scale (lower variance = higher score)
+        max_expected_variance = 10000  # Adjust based on game physics
+        control_score = max(0.0, min(1.0, 1.0 - (variance / max_expected_variance)))
+        
+        return control_score
+
+class BallPersonality:
+    """Gives the ball subtle personality traits to create emotional connection."""
+    
+    def __init__(self, adapts_to_player_style=True, remembers_past_attempts=True, shows_subtle_emotions=True):
+        self.adapts_to_player_style = adapts_to_player_style
+        self.remembers_past_attempts = remembers_past_attempts
+        self.shows_subtle_emotions = shows_subtle_emotions
+        
+        # Personality state
+        self.current_emotion = "neutral"
+        self.confidence = 0.5  # 0.0 to 1.0
+        self.excitement = 0.0  # 0.0 to 1.0
+        
+        # Memory
+        self.attempt_history = []
+        self.success_rate = 0.0
+        self.near_misses = 0
+        self.spectacular_moves = 0
+        
+        # Visual traits
+        self.color_shift = (0, 0, 0)  # RGB adjustment
+        self.pulse_pattern = "steady"
+        self.trail_personality = "standard"
+    
+    def update(self, game_state):
+        """Update personality based on current game state."""
+        # Extract relevant state information
+        speed = game_state.get("speed", 0)
+        collision_count = game_state.get("collision_count", 0)
+        near_target = game_state.get("near_target", False)
+        recent_success = game_state.get("recent_success", False)
+        
+        # Update emotion based on gameplay
+        if speed > 400:
+            self.excitement = min(1.0, self.excitement + 0.1)
+        else:
+            self.excitement = max(0.0, self.excitement - 0.03)
+        
+        # Handle near misses
+        if near_target and not recent_success:
+            self.near_misses += 1
+            self.current_emotion = "determined"
+        
+        # Handle successful moves
+        if recent_success:
+            self.spectacular_moves += 1
+            self.current_emotion = "excited"
+            self.confidence = min(1.0, self.confidence + 0.1)
+        
+        # Handle struggling
+        if collision_count > 3 and speed < 100:
+            self.current_emotion = "struggling"
+            self.confidence = max(0.0, self.confidence - 0.05)
+        
+        # Apply visual effects based on emotion
+        self._apply_emotional_effects()
+    
+    def _apply_emotional_effects(self):
+        """Apply visual effects to the ball based on current emotion."""
+        if self.current_emotion == "determined":
+            self.color_shift = (20, 20, 50)  # Slightly blueish
+            self.pulse_pattern = "focused"
+            self.trail_personality = "determined"
+        elif self.current_emotion == "excited":
+            self.color_shift = (50, 50, 0)  # Slightly yellowish
+            self.pulse_pattern = "energetic"
+            self.trail_personality = "sparkling"
+        elif self.current_emotion == "struggling":
+            self.color_shift = (50, 0, 0)  # Slightly reddish
+            self.pulse_pattern = "erratic"
+            self.trail_personality = "fading"
+        else:  # neutral
+            self.color_shift = (0, 0, 0)
+            self.pulse_pattern = "steady"
+            self.trail_personality = "standard"

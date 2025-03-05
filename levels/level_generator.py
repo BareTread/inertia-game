@@ -295,8 +295,8 @@ def generate_simple_level(level_num):
             # Check if the target is not too close to walls
             valid_position = True
             for wall in walls:
-                if (abs(x - wall.x) < wall.width/2 + radius + 10 and 
-                    abs(y - wall.y) < wall.height/2 + radius + 10):
+                if (abs(x - wall.rect.centerx) < wall.rect.width/2 + radius + 10 and 
+                    abs(y - wall.rect.centery) < wall.rect.height/2 + radius + 10):
                     valid_position = False
                     break
             
