@@ -6,10 +6,10 @@ def distance(x1, y1, x2, y2):
 
 def normalize_vector(x, y):
     """Normalize a vector to unit length."""
-    length = distance(0, 0, x, y)
-    if length == 0:
-        return 0, 0
-    return x / length, y / length
+    length = (x**2 + y**2)**0.5
+    if length < 0.0001:  # Avoid division by zero
+        return None
+    return (x / length, y / length)
 
 def clamp(value, min_value, max_value):
     """Clamp a value between min and max values."""

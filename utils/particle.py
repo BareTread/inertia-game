@@ -505,7 +505,9 @@ class ParticleSystem:
                 fade_mode="smooth"
             ) 
     
-    def create_particles(self, x, y, count, color, min_speed=50, max_speed=150, min_lifetime=0.3, max_lifetime=1.0, direction=None, spread=2*math.pi):
+    def create_particles(self, x, y, count, color, min_speed=50, max_speed=150, 
+                        min_lifetime=0.3, max_lifetime=1.0, direction=None, 
+                        spread=2*math.pi, size=2, size_range=None, fade_mode="linear", glow=False):
         """Create a burst of particles at the given position.
         
         Args:
@@ -516,6 +518,10 @@ class ParticleSystem:
             min_lifetime, max_lifetime: Lifetime range for particles
             direction: Optional direction vector (normalized). If None, particles go in all directions
             spread: Angle spread in radians (only used if direction is provided)
+            size: Size of particles (if size_range is None)
+            size_range: Optional tuple of (min_size, max_size) for random sizes
+            fade_mode: How particles fade ("linear", "late", "early")
+            glow: Whether particles have a glow effect
         """
         for _ in range(count):
             # Calculate random velocity
@@ -534,11 +540,16 @@ class ParticleSystem:
                 vel_y = math.sin(angle) * speed
             
             # Random size and lifetime
-            size = random.uniform(2, 5)
+            if size_range is None:
+                particle_size = size
+            else:
+                particle_size = random.uniform(size_range[0], size_range[1])
+            
+            # Random lifetime
             lifetime = random.uniform(min_lifetime, max_lifetime)
             
             # Create particle
             self.add_particle(
-                x, y, vel_x, vel_y, color, size, lifetime,
-                gravity=0, fade_mode="smooth", glow=True
+                x, y, vel_x, vel_y, color, particle_size, lifetime,
+                gravity=0, fade_mode=fade_mode, glow=glow
             ) 

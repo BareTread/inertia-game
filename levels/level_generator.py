@@ -67,7 +67,8 @@ def generate_tutorial_level():
         "energy_drain": 0,
         "tutorial": True,
         "tutorial_elements": tutorial_elements,
-        "hint": "Use arrow keys to apply force to the ball"
+        "hint": "Use arrow keys to apply force to the ball",
+        "par_time": 20.0  # Tutorial level should be easy to complete quickly
     }
 
 def generate_level_2():
@@ -105,7 +106,8 @@ def generate_level_2():
         "background_color": (20, 30, 50),
         "time_limit": 60,
         "energy_drain": 0.05,
-        "tutorial": False
+        "tutorial": False,
+        "par_time": 25.0  # Level 2 should be moderately easy
     }
 
 def generate_level_3():
@@ -147,38 +149,56 @@ def generate_level_3():
         "background_color": (30, 20, 30),
         "time_limit": 60,
         "energy_drain": 0.15,
-        "tutorial": False
+        "tutorial": False,
+        "par_time": 30.0  # Level 3 is more challenging
     }
 
 def generate_advanced_level_4():
-    """Generate level 4 - Gravity Wells."""
+    """Generate level 4 - Gravity Wells and Obstacles Challenge."""
     walls = [
+        # Outer walls
         Wall(400, 50, 700, 20),   # Top
         Wall(400, 550, 700, 20),  # Bottom
         Wall(50, 300, 20, 520),   # Left
         Wall(750, 300, 20, 520),  # Right
+        
+        # Interior maze structure
+        Wall(200, 200, 200, 20),  # Upper horizontal barrier
+        Wall(600, 400, 200, 20),  # Lower horizontal barrier
+        Wall(300, 350, 20, 200),  # Middle vertical barrier
     ]
     
     targets = [
-        Target(650, 450, 20, 100, True),
-        Target(150, 150, 20, 50, True)
+        Target(650, 450, 20, 100, True, color=(255, 100, 100)),  # Main goal
+        Target(150, 150, 20, 50, True, color=(255, 100, 100)),   # Secondary goal
+        Target(300, 500, 15, 30, False, color=(255, 150, 100))   # Bonus target
     ]
     
     surfaces = [
-        Surface(400, 300, 200, 100, "ice")
+        Surface(400, 300, 200, 100, 0.98, color=(100, 200, 255)),  # Ice patch in center
+        Surface(600, 200, 100, 100, 0.7, color=(200, 100, 100))    # High friction zone
     ]
     
     powerups = [
-        PowerUp(200, 400, "energy", 50)
+        PowerUp(200, 400, "energy"),
+        PowerUp(500, 150, "speed")
     ]
     
     gravity_wells = [
-        GravityWell(400, 300, 150, 20.0, False),  # Attractor in center
-        GravityWell(600, 150, 80, 15.0, True)    # Repeller in top-right
+        # Make gravity wells more visible with colors
+        GravityWell(400, 300, 120, 15.0, False, color=(100, 255, 150)),  # Attractor in center (green)
+        GravityWell(600, 150, 80, 12.0, True, color=(255, 100, 100))     # Repeller in top-right (red)
     ]
     
     bounce_pads = [
-        BouncePad(150, 450, 80, 30, (1, -1), 2.0)  # Diagonal bounce pad in bottom-left
+        BouncePad(150, 450, 80, 30, 45, 2.0, color=(0, 255, 200)),     # Bottom-left diagonal
+        BouncePad(650, 250, 80, 30, 225, 2.0, color=(0, 200, 255)),    # Top-right diagonal
+        BouncePad(400, 500, 100, 30, 270, 3.0, color=(100, 255, 200))  # Bottom center (upward)
+    ]
+    
+    # Add teleporters for extra challenge
+    teleporters = [
+        Teleporter(200, 500, 600, 100)  # Teleport from bottom-left to top-right
     ]
     
     return {
@@ -188,12 +208,13 @@ def generate_advanced_level_4():
         "powerups": powerups,
         "gravity_wells": gravity_wells,
         "bounce_pads": bounce_pads,
-        "teleporters": [],
-        "start_pos": (100, 500),
+        "teleporters": teleporters,
+        "start_pos": (100, 500),  # Start at bottom left
         "background_color": (15, 15, 35),
         "time_limit": 60,
         "energy_drain": 0.1,
-        "tutorial": False
+        "tutorial": False,
+        "par_time": 30.0  # Target time in seconds to complete the level
     }
 
 def generate_teleporter_level_5():

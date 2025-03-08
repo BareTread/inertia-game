@@ -188,6 +188,21 @@ class PowerUp:
     
     def apply_effect(self, game):
         """Apply the power-up effect to the game"""
+        # Check if game is valid and has required attributes
+        if not game:
+            print("Warning: Invalid game reference in PowerUp.apply_effect")
+            return
+            
+        if not hasattr(game, 'level_manager'):
+            print("Warning: Game missing level_manager in PowerUp.apply_effect")
+            return
+            
+        # Check if level_manager has a ball
+        ball = None
+        if game.level_manager:
+            ball = game.level_manager.get_ball()
+            
+        # Set effect start time
         self.effect_start_time = time.time()
         
         # Apply effect based on type
@@ -202,8 +217,8 @@ class PowerUp:
                 
         elif self.type == "speed":
             # Increase ball speed
-            if game.level_manager.get_ball():
-                game.level_manager.get_ball().speed_multiplier = 1.5
+            if ball:
+                ball.speed_multiplier = 1.5
                 
             # Show floating text
             if hasattr(game, 'add_floating_text'):
@@ -211,9 +226,8 @@ class PowerUp:
                 
         elif self.type == "shield":
             # Add shield to the ball
-            if game.level_manager.get_ball():
-                if hasattr(game.level_manager.get_ball(), 'has_shield'):
-                    game.level_manager.get_ball().has_shield = True
+            if ball and hasattr(ball, 'has_shield'):
+                ball.has_shield = True
                 
             # Show floating text
             if hasattr(game, 'add_floating_text'):

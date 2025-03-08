@@ -2,7 +2,9 @@ import os
 import json
 import random
 import pygame
+import time
 from typing import Dict, List, Any, Optional
+from state_manager import GameState
 from entities.wall import Wall
 from entities.target import Target
 from entities.ball import Ball
@@ -81,15 +83,25 @@ class LevelManager:
     def save_levels_data(self):
         """Save levels data to file."""
         try:
-            # Ensure data directory exists
-            os.makedirs("data", exist_ok=True)
-            
-            # Save levels data
             with open("data/levels.json", "w") as f:
                 json.dump(self.levels_data, f, indent=4)
-                
+            print("Saved levels data!")
         except Exception as e:
             print(f"Error saving levels data: {e}")
+            
+    def save_level_completion(self, level_num):
+        """Save level completion data."""
+        if not isinstance(level_num, int):
+            print(f"Invalid level number: {level_num}")
+            return
+            
+        # Update unlocked levels
+        if "unlocked" in self.levels_data:
+            if level_num + 1 > self.levels_data["unlocked"]:
+                self.levels_data["unlocked"] = min(level_num + 1, self.max_level)
+        
+        # Save to file
+        self.save_levels_data()
     
     def setup_level(self, level_number):
         """Set up entities for a level."""
@@ -243,6 +255,61 @@ class LevelManager:
             # Ensure level has required targets
             self._ensure_level_has_required_targets()
             
+            # Add a level start visual effect
+            if self.game and hasattr(self.game, 'particle_system') and self.ball:
+                # Create a more impressive burst of particles around the ball
+                self.game.particle_system.add_spiral_burst(
+                    self.ball.x, self.ball.y,
+                    color=(50, 200, 255),  # Light blue
+                    spiral_count=4,        # More spirals
+                    particles_per_spiral=20,
+                    radius=120,
+                    lifetime=1.5
+                )
+                
+                # Highlight important elements with particles
+                # Add bursts to each target to make them more noticeable
+                for entity in self.level_entities:
+                    if isinstance(entity, Target) and entity.required:
+                        self.game.particle_system.create_particles(
+                            entity.x, entity.y,
+                            15,  # Number of particles
+                            (255, 100, 100),  # Red for targets
+                            min_speed=30,
+                            max_speed=80,
+                            min_lifetime=0.5,
+                            max_lifetime=1.0,
+                            size_range=(2, 4),
+                            glow=True
+                        )
+                
+                # Display level start toast with more information
+                if hasattr(self.game, 'ui_manager'):
+                    # Main level start message
+                    self.game.ui_manager.add_toast(f"Level {level_number}: Get Ready!", 2.5, (0, 200, 0))
+                    
+                    # Add a tip specific to the level after a short delay
+                    level_tips = {
+                        1: "Tutorial: Use arrow keys to move the ball and hit targets",
+                        2: "Tip: Watch your energy - braking costs energy!",
+                        3: "Tip: Hit all the red targets to complete the level",
+                        4: "Tip: Green gravity wells attract, red ones repel",
+                        5: "Tip: Teleporters can help you reach distant areas"
+                    }
+                    
+                    if level_number in level_tips and hasattr(self.game, 'ui_manager'):
+                        # Schedule tip to appear after main message
+                        delay = 1.0
+                        tip = level_tips[level_number]
+                        
+                        # We need to delay this tip - let's use a simple timer approach
+                        def show_delayed_tip():
+                            self.game.ui_manager.add_toast(tip, 3.0, (200, 200, 0))
+                        
+                        # Schedule tip using threading if available
+                        import threading
+                        threading.Timer(delay, show_delayed_tip).start()
+            
             print(f"Level {level_number} setup with {len(self.game.entities)} entities")
         except Exception as e:
             print(f"Error setting up level {level_number}: {e}")
@@ -318,11 +385,11 @@ class LevelManager:
     
     def calculate_stars(self, level, energy, completion_time):
         """
-        Calculate stars earned for a level based on completion time and energy.
+        Calculate stars earned for a level based on completion time and energy efficiency.
         
         Args:
             level: Level number or identifier
-            energy: Remaining energy
+            energy: Remaining energy at level completion
             completion_time: Time taken to complete the level in seconds
             
         Returns:
@@ -331,29 +398,49 @@ class LevelManager:
         # Convert level to string for dictionary key
         level_key = str(level)
         
-        # Default values
-        max_time = 60.0  # Default max time in seconds
+        # Get level-specific parameters
+        level_data = {}
+        if isinstance(level, int) or level_key.isdigit():
+            from levels.level_generator import generate_level
+            try:
+                level_data = generate_level(int(level_key))
+            except Exception:
+                # Use defaults if level data not available
+                pass
         
-        # Default star thresholds
-        time_threshold_3 = max_time * 0.5  # 50% of max time for 3 stars
-        time_threshold_2 = max_time * 0.7  # 70% of max time for 2 stars
-        time_threshold_1 = max_time        # 100% of max time for 1 star
+        # Get level-specific parameters or use defaults
+        max_time = level_data.get("time_limit", 60.0)  # Default 60 seconds max time
+        par_time = level_data.get("par_time", max_time * 0.6)  # Default par time is 60% of max
+        max_energy = 100.0  # Maximum possible energy
+        starting_energy = max_energy  # Assume starting with max energy
         
-        # Ensure completion_time is a float
-        try:
-            completion_time = float(completion_time)
-        except (ValueError, TypeError):
-            completion_time = float('inf')  # If conversion fails, no stars
+        # Energy efficiency (percentage of energy conserved)
+        energy_efficiency = energy / starting_energy
         
-        # Calculate stars based on time
-        if completion_time <= time_threshold_3:
+        # Time efficiency (percentage of par time used, capped at 100%)
+        time_efficiency = min(1.0, par_time / max(0.1, completion_time))  # Avoid division by zero
+        
+        # Combined score (weighted 50/50 between time and energy)
+        combined_score = (energy_efficiency * 0.5) + (time_efficiency * 0.5)
+        
+        # Star thresholds (adjusted to be more intuitive)
+        threshold_3_stars = 0.75  # 75% combined efficiency for 3 stars
+        threshold_2_stars = 0.50  # 50% combined efficiency for 2 stars
+        threshold_1_star = 0.25   # 25% combined efficiency for 1 star
+        
+        # Determine stars based on combined score
+        if combined_score >= threshold_3_stars:
             stars = 3
-        elif completion_time <= time_threshold_2:
+        elif combined_score >= threshold_2_stars:
             stars = 2
-        elif completion_time <= time_threshold_1:
+        elif combined_score >= threshold_1_star:
             stars = 1
         else:
             stars = 0
+            
+        # Debug info (can be removed in production)
+        print(f"Level {level_key} - Time: {completion_time:.1f}s, Energy: {energy:.0f}, " +
+              f"Score: {combined_score:.2f}, Stars: {stars}")
             
         # Initialize stars dictionary if it doesn't exist
         if "stars" not in self.levels_data:
@@ -367,8 +454,8 @@ class LevelManager:
             self.save_levels_data()
             
         # Unlock next level if needed
-        if isinstance(level, int) and stars > 0:
-            next_level = level + 1
+        if (isinstance(level, int) or level_key.isdigit()) and stars > 0:
+            next_level = int(level_key) + 1
             current_unlocked = self.levels_data.get("unlocked", 1)
             if next_level > current_unlocked:
                 self.levels_data["unlocked"] = next_level
@@ -438,10 +525,51 @@ class LevelManager:
             if next_level > self.max_level:
                 # Reset to level 1 if we reached the max
                 next_level = 1
-            return self.setup_level(next_level)
+            
+            # Store next level number for clarity
+            next_level_num = next_level
+            
+            # Clear current level
+            self.clear_entities()
+            
+            # Reset ball reference
+            self.ball = None
+            
+            # Reset level stats in game if available
+            if self.game:
+                self.game.energy = self.game.max_energy
+                self.game.energy_used = 0
+                self.game.moves_made = 0
+                self.game.level_complete = False
+                
+                # Reset camera if available
+                if hasattr(self.game, 'camera'):
+                    self.game.camera.reset()
+            
+            print(f"Transitioning to level {next_level_num}")
+            
+            # Change game state to GAME (this will trigger reset_for_state_change)
+            if self.game and hasattr(self.game, 'state_manager'):
+                self.game.state_manager.change_state(GameState.GAME)
+            
+            # Now set up the next level
+            success = self.setup_level(next_level_num)
+            
+            # Set level start time
+            if self.game:
+                self.game.level_start_time = time.time()
+                self.game.level_playable = False
+                
+                # Show level started toast
+                if hasattr(self.game, 'ui_manager'):
+                    self.game.ui_manager.add_toast(f"Level {next_level_num}", 2.0, (0, 200, 255))
+            
+            print(f"Advanced to level {next_level_num} (success: {success})")
+            return success
         else:
             # Default to level 1 if current level is not a number
-            return self.setup_level(1) 
+            print("Current level not a number, defaulting to level 1")
+            return self.setup_level(1)
     
     def _ensure_level_has_required_targets(self):
         """Verify that the level has at least one required target. Add one if needed."""

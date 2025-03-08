@@ -109,14 +109,37 @@ class Game:
         self.level_playable_delay = 3.0  # Seconds before level can be completed
         self.level_complete = False
         
+        # Scoring and level stats
+        self.score = 0
+        self.energy_used = 0
+        self.moves_made = 0
+        self.completion_time = 0
+        self.level_stars = 0      # Stars earned in current level
+        self.level_completion_time = 0  # Time taken to complete the level
+        
         # Camera system for larger playing field
         self.camera = Camera(WIDTH, HEIGHT)
+        self.camera.set_deadzone(0.2, 0.2)  # 20% of screen size deadzone
         
         # World dimensions
         self.world_width = WIDTH * 3  # Larger world than screen
         self.world_height = HEIGHT * 3  # Larger world than screen
         
-        # Aiming properties
+        # Keyboard control states
+        self.key_states = {
+            pygame.K_UP: False,
+            pygame.K_DOWN: False,
+            pygame.K_LEFT: False,
+            pygame.K_RIGHT: False,
+            pygame.K_SPACE: False  # For braking
+        }
+        
+        # Force settings
+        self.force_amount = 500.0  # Base force amount per second
+        self.braking_force = 0.8   # Braking force multiplier
+        
+        # Aiming properties (for mouse control - now optional)
+        self.use_mouse_controls = False  # Set to False to use keyboard controls
         self.aiming = False
         self.aim_start_pos = None
         self.aim_current_pos = None
@@ -144,7 +167,6 @@ class Game:
         
         # Time limit for level
         self.time_limit = 60.0  # Default time limit in seconds
-        self.score = 0
         self.high_score = self._load_high_score()
         
         # Set up the initial game state
@@ -372,6 +394,12 @@ class Game:
     
     def _start_level(self, level_num):
         """Start a new level."""
+        # Reset level stats
+        self.score = 0
+        self.energy_used = 0
+        self.moves_made = 0
+        self.energy = self.max_energy
+        
         # Reset camera
         self.camera.set_target_position((0, 0))
         
@@ -386,18 +414,34 @@ class Game:
         self.level_playable = False  # Will be set to True after delay
         self.level_complete = False
         
-        # Change state to game
-        self.state_manager.change_state(GameState.GAME)
-        
-        # Add a toast notification
-        self.ui_manager.add_toast(f"Level {level_num} Started", 2.0, (0, 255, 0))
-        
-        print(f"Starting level {level_num}")
+        # Show level start message
+        self.ui_manager.add_toast(f"Level {level_num}", 2.0, (0, 200, 255))
     
     def _restart_level(self):
         """Restart the current level."""
+        # Reset level stats
+        self.energy = self.max_energy
+        self.energy_used = 0
+        self.moves_made = 0
+        self.level_complete = False
+        
+        # Reset camera
+        self.camera.set_target_position((0, 0))
+        
+        # Restart level through level manager
         current_level = self.level_manager.current_level
-        self._start_level(current_level)
+        self.level_manager.setup_level(current_level)
+        
+        # Reset level start time
+        self.level_start_time = time.time()
+        self.level_playable = False
+        
+        # Change state to game if not already
+        if self.state_manager.current_state != GameState.GAME:
+            self.state_manager.change_state(GameState.GAME)
+            
+        # Add notification
+        self.ui_manager.add_toast(f"Level {current_level} Restarted", 2.0, (0, 200, 255))
     
     def _set_sound_volume(self, volume):
         """Set sound volume."""
@@ -463,40 +507,49 @@ class Game:
     
     def _complete_level(self):
         """Handle level completion."""
-        if self.state_manager.current_state != GameState.GAME:
-            return
-        
-        # Calculate time taken
-        time_taken = (pygame.time.get_ticks() - self.level_start_time) / 1000
-        self.level_completion_time = time_taken  # Store for display
-        
-        try:
-            # Calculate stars based on time and energy
-            stars = self.level_manager.calculate_stars(self.level_manager.current_level, self.energy, time_taken)
-            self.level_stars = stars  # Store for display
+        if not self.level_complete:
+            # Calculate completion time
+            self.completion_time = time.time() - self.level_start_time
+            self.level_completion_time = self.completion_time
             
-            # Show toast with stars
+            # Calculate stars based on performance
+            stars = self.level_manager.calculate_stars(
+                self.level_manager.current_level,
+                self.energy,
+                self.completion_time
+            )
+            self.level_stars = stars
+            
+            # Save progress
+            self.level_manager.save_levels_data()
+            
+            # Get star text representation
             star_text = "★" * stars + "☆" * (3 - stars)
-            self.ui_manager.add_toast(f"Level Complete! {star_text}", 3.0, YELLOW)
             
-            # Change to level complete state
-            self.state_manager.change_state(GameState.LEVEL_COMPLETE)
+            # Create an appropriate message based on star rating
+            if stars == 3:
+                message = f"Perfect! {star_text}"
+                color = (255, 255, 0)  # Gold
+            elif stars == 2:
+                message = f"Great job! {star_text}"
+                color = (200, 200, 0)  # Dark yellow
+            elif stars == 1:
+                message = f"Level Complete {star_text}"
+                color = (150, 150, 150)  # Silver
+            else:
+                message = f"Try again for stars! {star_text}"
+                color = (100, 100, 100)  # Gray
+                
+            # Show completion message with appropriate styling
+            self.ui_manager.add_toast(message, 3.0, color)
             
-            # Add particles for celebration effect
-            if self.level_manager.ball:
-                x, y = self.level_manager.ball.get_position()
-                self.particle_system.add_explosion(
-                    x, y,
-                    color=(255, 255, 0),  # Yellow for celebration
-                    count=50,
-                    speed=100,
-                    size_range=(5, 10),
-                    lifetime_range=(0.5, 2.0),
-                    glow=True
-                )
-        except Exception as e:
-            print(f"Error completing level: {e}")
-            # Fall back to just changing state
+            # Store level completion time for animations
+            self.level_complete_time = time.time()
+            
+            # Mark level as complete
+            self.level_complete = True
+            
+            # Change state to level complete screen
             self.state_manager.change_state(GameState.LEVEL_COMPLETE)
     
     def _check_collisions(self):
@@ -595,18 +648,22 @@ class Game:
         return True
     
     def _update_camera(self):
+        """Update camera position to follow the ball."""
         if not self.level_manager.get_ball():
             return
  
         # Get the ball's position
         ball_x, ball_y = self.level_manager.get_ball().get_position()
         
-        # Calculate target camera position
-        target_x = max(0, ball_x - WIDTH // 2)
-        target_y = max(0, ball_y - HEIGHT // 2)
+        # Ensure camera bounds are set
+        if not hasattr(self.camera, 'bounds') or self.camera.bounds is None:
+            # Set camera bounds based on world dimensions
+            self.camera.set_bounds((0, 0, self.world_width, self.world_height))
         
-        # Smoothly move camera towards target position
-        self.camera.set_target_position((target_x, target_y))
+        # Set target position to ball's position
+        self.camera.set_target_position((ball_x, ball_y))
+        
+        # Update camera
         self.camera.update(self.dt)
     
     def _reset_power_up_effects(self):
@@ -638,6 +695,14 @@ class Game:
         current_state = self.state_manager.current_state
         
         if current_state == GameState.GAME:
+            # Regenerate energy
+            self.energy = min(self.max_energy, self.energy + self.energy_regen_rate * dt)
+            
+            # Process keyboard controls
+            ball = self.level_manager.get_ball()
+            if ball and not self.use_mouse_controls:
+                self._apply_keyboard_controls(ball, dt)
+            
             # Update ball
             if self.level_manager.get_ball():
                 self.level_manager.get_ball().update(dt)
@@ -658,11 +723,12 @@ class Game:
                 if collision_result.get('level_complete', False) and self.level_playable:
                     self.level_complete = True
                     self.state_manager.change_state(GameState.LEVEL_COMPLETE)
-            
+                    
             # Update level playable flag
             current_time = time.time()
             if not self.level_playable and current_time - self.level_start_time > self.level_playable_delay:
                 self.level_playable = True
+                self.ui_manager.add_toast("Level Ready! Hit the targets to complete the level.", 3.0, (0, 255, 0))
             
             # Update camera position based on ball position
             self._update_camera()
@@ -679,25 +745,98 @@ class Game:
             if self.applying_force and any(self.force_direction):
                 self._apply_force()
         
-        # Boundary checking for ball position to prevent extremely large coordinates
-        if self.level_manager.ball:
-            # Define a maximum distance from the center of the level
-            max_distance = 50000  # This is an arbitrary large limit
-            center_x = 600  # Approximate center of the level
-            center_y = 350
+        # Call our new boundary checking method
+        self._enforce_ball_boundaries()
+        
+        # Update UI manager
+        self.ui_manager.update(dt)
+        
+        # Update floating texts
+        for text in self.floating_texts[:]:
+            text.update(dt)
+            if text.lifetime <= 0:
+                self.floating_texts.remove(text)
+        
+        # Update UI manager if we haven't already
+        if not hasattr(self, 'ui_manager_updated'):
+            self.ui_manager.update(dt)
+    
+    def _apply_keyboard_controls(self, ball, dt):
+        """Apply forces to the ball based on keyboard input."""
+        # Calculate base force for this frame (force per second * dt)
+        base_force = self.force_amount * dt
+        
+        # Initialize force components
+        force_x = 0
+        force_y = 0
+        
+        # Calculate force based on key states
+        if self.key_states[pygame.K_UP]:
+            force_y -= base_force
+        if self.key_states[pygame.K_DOWN]:
+            force_y += base_force
+        if self.key_states[pygame.K_LEFT]:
+            force_x -= base_force
+        if self.key_states[pygame.K_RIGHT]:
+            force_x += base_force
+        
+        # Apply braking if space is pressed
+        if self.key_states[pygame.K_SPACE]:
+            # Use the new brake method for better control and visual effect
+            if hasattr(ball, 'brake'):
+                ball.brake()
+            else:
+                # Fallback to old method if brake method not available
+                ball.vel_x *= self.braking_force
+                ball.vel_y *= self.braking_force
+        
+        # Apply force to the ball if any directional keys are pressed
+        if force_x != 0 or force_y != 0:
+            # Check if we have enough energy
+            energy_cost = max(1, base_force * 0.01)  # Small energy cost per update
             
-            # Calculate distance from center
-            dx = self.level_manager.ball.x - center_x
-            dy = self.level_manager.ball.y - center_y
-            distance = math.sqrt(dx*dx + dy*dy)
-            
-            # If the ball is beyond the maximum distance, reset it to the center
-            if distance > max_distance or math.isnan(self.level_manager.ball.x) or math.isnan(self.level_manager.ball.y):
-                print(f"Ball out of bounds at ({self.level_manager.ball.x}, {self.level_manager.ball.y}), resetting position")
-                self.level_manager.ball.x = center_x
-                self.level_manager.ball.y = center_y
-                self.level_manager.ball.vel_x = 0
-                self.level_manager.ball.vel_y = 0
+            if self.energy >= energy_cost:
+                # Apply force
+                ball.apply_force(force_x, force_y)
+                
+                # Reduce energy
+                self.energy -= energy_cost
+                self.energy_used += energy_cost
+                
+                # Count as a move if significant force is applied
+                if base_force > 1.0:
+                    self.moves_made += 1
+                
+                # Create thrust particles
+                if self.particle_system:
+                    # Calculate direction
+                    magnitude = math.sqrt(force_x**2 + force_y**2)
+                    if magnitude > 0:
+                        direction = (-force_x / magnitude, -force_y / magnitude)
+                        self.particle_system.create_particles(
+                            ball.x, ball.y,
+                            3,  # Fewer particles per frame for continuous effect
+                            (100, 100, 255),  # Blue thrust
+                            min_speed=50,
+                            max_speed=150,
+                            min_lifetime=0.1,
+                            max_lifetime=0.3,
+                            direction=direction,
+                            spread=0.3
+                        )
+        else:
+            # Not enough energy - show notification less frequently and with less aggressive styling
+            # Track last time we showed the message
+            current_time = time.time()
+            if not hasattr(self, '_last_energy_warning_time'):
+                self._last_energy_warning_time = 0
+                
+            # Only show the warning every 5 seconds at most
+            if current_time - self._last_energy_warning_time > 5.0:
+                # Use a more subtle color and longer duration
+                soft_orange = (255, 180, 100)
+                self.ui_manager.add_toast("Energy Low", 2.0, soft_orange)
+                self._last_energy_warning_time = current_time
     
     def draw(self):
         """Draw the game based on the current state."""
@@ -758,35 +897,231 @@ class Game:
                 
             # Draw overlay
             overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))  # Semi-transparent black
+            self.screen.blit(overlay, (0, 0))
+            
+            # Draw "Level Complete" text
+            level_complete_text = self.large_font.render("Level Complete!", True, (255, 255, 255))
+            level_complete_rect = level_complete_text.get_rect(center=(WIDTH // 2, HEIGHT // 4))
+            self.screen.blit(level_complete_text, level_complete_rect)
+            
+            # Draw level number
+            level_text = self.font.render(f"Level {self.level_manager.current_level}", True, (200, 200, 255))
+            level_rect = level_text.get_rect(center=(WIDTH // 2, HEIGHT // 4 + 50))
+            self.screen.blit(level_text, level_rect)
+            
+            # Calculate metrics for visual display
+            time_efficiency = min(1.0, 0.6 * 60.0 / max(0.1, self.level_completion_time))
+            energy_efficiency = self.energy / 100.0
+            
+            # Draw time performance (green bar for good, yellow for medium, red for poor)
+            time_label = self.font.render("Time:", True, (255, 255, 255))
+            self.screen.blit(time_label, (WIDTH // 2 - 150, HEIGHT // 4 + 80))
+            
+            time_text = self.font.render(f"{self.level_completion_time:.2f}s", True, (255, 255, 255))
+            self.screen.blit(time_text, (WIDTH // 2 + 150 - time_text.get_width(), HEIGHT // 4 + 80))
+            
+            # Time efficiency bar
+            bar_width = 200
+            filled_width = int(bar_width * time_efficiency)
+            pygame.draw.rect(self.screen, (50, 50, 50), (WIDTH // 2 - 100, HEIGHT // 4 + 105, bar_width, 15))
+            
+            # Color gradient based on efficiency
+            if time_efficiency > 0.75:
+                time_color = (0, 255, 0)  # Green for excellent
+            elif time_efficiency > 0.5:
+                time_color = (255, 255, 0)  # Yellow for good
+            elif time_efficiency > 0.25:
+                time_color = (255, 150, 0)  # Orange for average
+            else:
+                time_color = (255, 0, 0)  # Red for poor
+                
+            pygame.draw.rect(self.screen, time_color, (WIDTH // 2 - 100, HEIGHT // 4 + 105, filled_width, 15))
+            
+            # Draw energy performance
+            energy_label = self.font.render("Energy:", True, (255, 255, 255))
+            self.screen.blit(energy_label, (WIDTH // 2 - 150, HEIGHT // 4 + 130))
+            
+            energy_text = self.font.render(f"{int(self.energy)}/{100}", True, (255, 255, 255))
+            self.screen.blit(energy_text, (WIDTH // 2 + 150 - energy_text.get_width(), HEIGHT // 4 + 130))
+            
+            # Energy efficiency bar
+            filled_width = int(bar_width * energy_efficiency)
+            pygame.draw.rect(self.screen, (50, 50, 50), (WIDTH // 2 - 100, HEIGHT // 4 + 155, bar_width, 15))
+            
+            # Color gradient based on efficiency
+            if energy_efficiency > 0.75:
+                energy_color = (0, 255, 0)  # Green for excellent
+            elif energy_efficiency > 0.5:
+                energy_color = (255, 255, 0)  # Yellow for good
+            elif energy_efficiency > 0.25:
+                energy_color = (255, 150, 0)  # Orange for average
+            else:
+                energy_color = (255, 0, 0)  # Red for poor
+                
+            pygame.draw.rect(self.screen, energy_color, (WIDTH // 2 - 100, HEIGHT // 4 + 155, filled_width, 15))
+            
+            # Calculate overall score (same formula as in level_manager.calculate_stars)
+            overall_score = (time_efficiency * 0.5) + (energy_efficiency * 0.5)
+            score_text = self.font.render(f"Overall Score: {int(overall_score * 100)}%", True, (255, 255, 255))
+            self.screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 4 + 180))
+            
+            # Draw star requirements explanation
+            req_text = self.small_font.render("Stars: 75%+ = ★★★, 50%+ = ★★, 25%+ = ★", True, (200, 200, 200))
+            self.screen.blit(req_text, (WIDTH // 2 - req_text.get_width() // 2, HEIGHT // 4 + 205))
+            
+            # Draw stars with animation
+            star_size = 40
+            total_stars_width = star_size * 3 + 20  # 3 stars with 10px spacing between
+            start_x = (WIDTH - total_stars_width) // 2
+            star_y = HEIGHT // 4 + 240
+            
+            # Animation timing
+            current_time = pygame.time.get_ticks() / 1000
+            animation_duration = 0.3  # How long each star takes to appear
+            delay_between_stars = 0.5  # Delay between stars appearing
+            
+            # Draw stars
+            for i in range(3):
+                # Determine if this star should be shown based on animation timing
+                star_reveal_time = self.level_completion_time + (i * delay_between_stars)
+                time_since_reveal = current_time - star_reveal_time
+                
+                # Skip stars that haven't reached their reveal time yet
+                if time_since_reveal < 0:
+                    continue
+                
+                # Determine animation progress (0.0 to 1.0)
+                animation_progress = min(1.0, time_since_reveal / animation_duration)
+                
+                # Scale effect - stars grow from small to full size
+                scaled_size = int(star_size * animation_progress)
+                if scaled_size <= 0:
+                    continue
+                
+                # Color with fade-in effect
+                star_color = (255, 215, 0) if i < self.level_stars else (100, 100, 100)
+                alpha = int(255 * animation_progress)
+                current_color = (star_color[0], star_color[1], star_color[2], alpha)
+                
+                # Calculate star center
+                star_center_x = start_x + i * (star_size + 10) + star_size // 2
+                star_center_y = star_y + star_size // 2
+                
+                # Draw star with current size and alpha
+                points = []
+                for j in range(5):
+                    # Calculate outer point of the star (with current size)
+                    angle = math.pi * (0.5 - 2 * j / 5)
+                    outer_radius = scaled_size // 2
+                    points.append((
+                        star_center_x + outer_radius * math.cos(angle),
+                        star_center_y - outer_radius * math.sin(angle)
+                    ))
+                    
+                    # Calculate inner point of the star (with current size)
+                    angle = math.pi * (0.5 - (2 * j + 1) / 5)
+                    inner_radius = scaled_size // 5
+                    points.append((
+                        star_center_x + inner_radius * math.cos(angle),
+                        star_center_y - inner_radius * math.sin(angle)
+                    ))
+                
+                # Draw filled star with current color
+                if len(points) >= 3:  # Need at least 3 points to draw a polygon
+                    # Create a temporary surface with alpha
+                    star_surface = pygame.Surface((scaled_size, scaled_size), pygame.SRCALPHA)
+                    
+                    # Adjust points to draw on this surface
+                    adjusted_points = [(p[0] - (star_center_x - scaled_size // 2),
+                                      p[1] - (star_center_y - scaled_size // 2)) for p in points]
+                    
+                    # Draw the star on the temporary surface
+                    pygame.draw.polygon(star_surface, current_color, adjusted_points)
+                    
+                    # Add a glow effect for earned stars
+                    if i < self.level_stars and animation_progress == 1.0:
+                        # Pulse effect based on time
+                        glow_size = 5 + int(2 * math.sin(current_time * 4))
+                        glow_surface = pygame.Surface((scaled_size + glow_size*2, scaled_size + glow_size*2), pygame.SRCALPHA)
+                        
+                        # Draw expanded star for glow
+                        pygame.draw.polygon(glow_surface, (255, 255, 100, 50), 
+                                          [(p[0] + glow_size, p[1] + glow_size) for p in adjusted_points])
+                        
+                        # Blit the glow first, then the star
+                        self.screen.blit(glow_surface, (star_center_x - scaled_size // 2 - glow_size, 
+                                                     star_center_y - scaled_size // 2 - glow_size))
+                    
+                    # Blit the star to the screen
+                    self.screen.blit(star_surface, (star_center_x - scaled_size // 2, star_center_y - scaled_size // 2))
+            
+            # Draw UI elements
+            self.ui_manager.draw(self.screen)
+        
+        elif current_state == GameState.MAIN_MENU:
+            # Draw main menu background
+            self._draw_main_menu_background()
+            
+            # Draw title
+            if hasattr(self, 'logo') and self.logo:
+                logo_rect = self.logo.get_rect(center=(WIDTH // 2, HEIGHT // 4))
+                self.screen.blit(self.logo, logo_rect)
+            else:
+                # Fallback to text title
+                title_text = self.large_font.render("Inertia Deluxe", True, (255, 255, 255))
+                title_rect = title_text.get_rect(center=(WIDTH // 2, HEIGHT // 4))
+                self.screen.blit(title_text, title_rect)
+            
+            # Draw UI elements
+            self.ui_manager.draw(self.screen)
+        
+        elif current_state == GameState.LEVEL_SELECT:
+            # Draw title
+            title_text = self.large_font.render("Select Level", True, (255, 255, 255))
+            title_rect = title_text.get_rect(center=(WIDTH // 2, 60))
+            self.screen.blit(title_text, title_rect)
+            
+            # Draw UI elements (level buttons)
+            self.ui_manager.draw(self.screen)
+        
+        elif current_state == GameState.SETTINGS:
+            # Draw title
+            title_text = self.large_font.render("Settings", True, (255, 255, 255))
+            title_rect = title_text.get_rect(center=(WIDTH // 2, 60))
+            self.screen.blit(title_text, title_rect)
+            
+            # Draw UI elements
+            self.ui_manager.draw(self.screen)
+            
+            # Draw settings
+            self._draw_settings()
+        
+        elif current_state == GameState.PAUSED:
+            # Draw the game in the background
+            camera_offset = self.camera.position
+            
+            # Draw world boundary
+            self._draw_world_boundary(camera_offset)
+            
+            # Draw entities
+            for entity in self.level_manager.get_entities():
+                if hasattr(entity, 'draw'):
+                    entity.draw(self.screen, camera_offset)
+            
+            # Draw ball
+            if self.level_manager.get_ball():
+                self.level_manager.get_ball().draw(self.screen, camera_offset)
+            
+            # Draw overlay
+            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 150))  # Semi-transparent black
             self.screen.blit(overlay, (0, 0))
             
-            # Draw "LEVEL COMPLETE" text
-            font = pygame.font.SysFont(None, 72)
-            text = font.render("LEVEL COMPLETE", True, WHITE)
-            self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 4))
-            
-            # Draw stars
-            star_spacing = 80
-            star_y = HEIGHT // 3
-            for i in range(3):
-                star_x = WIDTH // 2 + (i - 1) * star_spacing
-                if i < self.level_stars:
-                    pygame.draw.polygon(self.screen, YELLOW, [
-                        (star_x, star_y - 25), (star_x + 7, star_y - 10),
-                        (star_x + 25, star_y - 10), (star_x + 10, star_y),
-                        (star_x + 15, star_y + 20), (star_x, star_y + 10),
-                        (star_x - 15, star_y + 20), (star_x - 10, star_y),
-                        (star_x - 25, star_y - 10), (star_x - 7, star_y - 10)
-                    ])
-                else:
-                    pygame.draw.polygon(self.screen, GRAY, [
-                        (star_x, star_y - 25), (star_x + 7, star_y - 10),
-                        (star_x + 25, star_y - 10), (star_x + 10, star_y),
-                        (star_x + 15, star_y + 20), (star_x, star_y + 10),
-                        (star_x - 15, star_y + 20), (star_x - 10, star_y),
-                        (star_x - 25, star_y - 10), (star_x - 7, star_y - 10)
-                    ], 1)
+            # Draw "PAUSED" text
+            paused_text = self.large_font.render("PAUSED", True, (255, 255, 255))
+            paused_rect = paused_text.get_rect(center=(WIDTH // 2, HEIGHT // 4))
+            self.screen.blit(paused_text, paused_rect)
             
             # Draw UI elements
             self.ui_manager.draw(self.screen)
@@ -794,52 +1129,24 @@ class Game:
         # Update the display
         pygame.display.flip()
     
-    def _draw_main_menu(self):
-        """Draw the main menu screen."""
-        # Draw background with some particle effects
-        self._draw_background([0, 0])
+    def _draw_main_menu_background(self):
+        """Draw an animated background for the main menu."""
+        # Fill the background with a dark color
+        self.screen.fill((20, 30, 50))
         
-        # Create a semi-transparent overlay
-        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 100))  # Semi-transparent black
-        self.screen.blit(overlay, (0, 0))
+        # Draw a grid of dots
+        dot_spacing = 30
+        dot_size = 2
+        time_offset = pygame.time.get_ticks() / 1000
         
-        # Create dynamic particle effects in the background
-        self.particle_system.draw(self.alpha_surface)
-        self.screen.blit(self.alpha_surface, (0, 0))
-        
-        # Draw the game logo at the top
-        logo_x = (WIDTH - self.logo.get_width()) // 2
-        logo_y = HEIGHT // 6
-        self.screen.blit(self.logo, (logo_x, logo_y))
-        
-        # Draw version info at the bottom
-        version_text = self.small_font.render("Version 1.0", True, (150, 150, 150))
-        version_rect = version_text.get_rect(bottomright=(WIDTH - 10, HEIGHT - 10))
-        self.screen.blit(version_text, version_rect)
-        
-        # Draw UI elements (buttons)
-        self.ui_manager.draw(self.screen)
-    
-    def _draw_level_select(self):
-        """Draw the level select screen."""
-        self.alpha_surface.fill((0, 0, 0, 0))
-        
-        # Draw a grid in the background for the level select screen
-        for x in range(0, WIDTH, 50):
-            pygame.draw.line(self.alpha_surface, (30, 30, 50, 50), (x, 0), (x, HEIGHT))
-        for y in range(0, HEIGHT, 50):
-            pygame.draw.line(self.alpha_surface, (30, 30, 50, 50), (0, y), (WIDTH, y))
-        
-        # Draw heading
-        font = pygame.font.SysFont(None, 60)
-        text = font.render("SELECT LEVEL", True, WHITE)
-        self.alpha_surface.blit(text, (WIDTH // 2 - text.get_width() // 2, 50))
-        
-        self.screen.blit(self.alpha_surface, (0, 0))
-        
-        # Draw UI elements (level buttons)
-        self.ui_manager.draw(self.screen)
+        for x in range(0, WIDTH, dot_spacing):
+            for y in range(0, HEIGHT, dot_spacing):
+                # Calculate dot color based on position and time
+                color_value = int(128 + 127 * math.sin(x * 0.01 + y * 0.01 + time_offset))
+                dot_color = (color_value // 4, color_value // 2, color_value)
+                
+                # Draw dot
+                pygame.draw.circle(self.screen, dot_color, (x, y), dot_size)
     
     def _draw_settings(self):
         """Draw the settings screen."""
@@ -863,16 +1170,61 @@ class Game:
     
     def _draw_hud(self):
         """Draw the heads-up display."""
+        # Draw energy meter
+        energy_x = 10
+        energy_y = 10
+        energy_width = 200
+        energy_height = 20
+        
+        # Draw energy background
+        pygame.draw.rect(self.screen, DARK_GRAY, (energy_x, energy_y, energy_width, energy_height))
+        
+        # Draw energy fill
+        energy_fill = int(energy_width * (self.energy / self.max_energy))
+        if self.energy > 70:
+            energy_color = GREEN
+        elif self.energy > 30:
+            energy_color = YELLOW
+        else:
+            energy_color = RED
+        pygame.draw.rect(self.screen, energy_color, (energy_x, energy_y, energy_fill, energy_height))
+        
+        # Draw energy text
+        energy_text = f"Energy: {int(self.energy)}/{int(self.max_energy)}"
+        energy_surface = self.font.render(energy_text, True, WHITE)
+        self.screen.blit(energy_surface, (energy_x + 10, energy_y + energy_height + 5))
+        
         # Draw level information
         level_text = f"Level: {self.level_manager.current_level}"
         level_surface = self.font.render(level_text, True, WHITE)
-        self.screen.blit(level_surface, (10, 10))
+        self.screen.blit(level_surface, (WIDTH - level_surface.get_width() - 20, 10))
+        
+        # Draw controls help
+        controls_text = "Controls: " + ("Mouse" if self.use_mouse_controls else "Keyboard")
+        controls_surface = self.small_font.render(controls_text, True, WHITE)
+        self.screen.blit(controls_surface, (WIDTH - controls_surface.get_width() - 20, 40))
+        
+        controls_help_text = "Press T to toggle controls"
+        controls_help_surface = self.small_font.render(controls_help_text, True, WHITE)
+        self.screen.blit(controls_help_surface, (WIDTH - controls_help_surface.get_width() - 20, 60))
+        
+        # Draw keyboard controls help if using keyboard
+        if not self.use_mouse_controls:
+            key_controls = [
+                "Arrows: Move",
+                "Space: Brake",
+                "R: Restart level"
+            ]
+            
+            for i, text in enumerate(key_controls):
+                surface = self.small_font.render(text, True, WHITE)
+                self.screen.blit(surface, (WIDTH - surface.get_width() - 20, 80 + i * 20))
         
         # Draw FPS if debug is enabled
         if self.show_debug:
             fps_text = f"FPS: {self.current_fps}"
             fps_surface = self.small_font.render(fps_text, True, WHITE)
-            self.screen.blit(fps_surface, (10, 40))
+            self.screen.blit(fps_surface, (10, energy_y + energy_height + 30))
             
             # Draw additional debug info
             ball = self.level_manager.get_ball()
@@ -880,19 +1232,19 @@ class Game:
                 velocity = math.sqrt(ball.vel_x**2 + ball.vel_y**2)
                 debug_text = f"Ball Velocity: {velocity:.2f}"
                 debug_surface = self.small_font.render(debug_text, True, WHITE)
-                self.screen.blit(debug_surface, (10, 60))
+                self.screen.blit(debug_surface, (10, energy_y + energy_height + 50))
                 
                 pos_text = f"Ball Position: ({ball.x:.1f}, {ball.y:.1f})"
                 pos_surface = self.small_font.render(pos_text, True, WHITE)
-                self.screen.blit(pos_surface, (10, 80))
+                self.screen.blit(pos_surface, (10, energy_y + energy_height + 70))
             
             # Draw entity count
             entities_text = f"Entities: {len(self.level_manager.get_entities())}"
             entities_surface = self.small_font.render(entities_text, True, WHITE)
-            self.screen.blit(entities_surface, (10, 100))
+            self.screen.blit(entities_surface, (10, energy_y + energy_height + 90))
         
         # Draw aiming line when aiming
-        if self.aiming and self.aim_start_pos and self.aim_current_pos:
+        if self.aiming and self.aim_start_pos and self.aim_current_pos and self.use_mouse_controls:
             # Draw line from aim start to current position
             pygame.draw.line(
                 self.screen,
@@ -901,6 +1253,17 @@ class Game:
                 self.aim_current_pos,
                 2
             )
+            
+            # Calculate force magnitude
+            force_x = (self.aim_start_pos[0] - self.aim_current_pos[0]) * 0.1
+            force_y = (self.aim_start_pos[1] - self.aim_current_pos[1]) * 0.1
+            force_magnitude = math.sqrt(force_x**2 + force_y**2)
+            
+            # Draw force indicator
+            if force_magnitude > 0:
+                force_text = f"Force: {force_magnitude:.1f}"
+                force_surface = self.small_font.render(force_text, True, WHITE)
+                self.screen.blit(force_surface, (self.aim_current_pos[0] + 10, self.aim_current_pos[1] + 10))
             
             # Draw direction indicator
             pygame.draw.circle(
@@ -994,26 +1357,36 @@ class Game:
                 elif event.key == pygame.K_F3:
                     self.show_debug = not self.show_debug
                 
+                # Update key state
+                if event.key in self.key_states:
+                    self.key_states[event.key] = True
+                
                 # Game state specific keys
                 if current_state == GameState.GAME:
                     self._handle_game_keydown(event)
+            
+            # Key up events
+            elif event.type == pygame.KEYUP:
+                # Update key state
+                if event.key in self.key_states:
+                    self.key_states[event.key] = False
                 
             # Mouse events
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Game state specific mouse events
-                if current_state == GameState.GAME:
+                if current_state == GameState.GAME and self.use_mouse_controls:
                     self._handle_game_mousedown(event, mouse_pos)
                 
             # Mouse motion events
             elif event.type == pygame.MOUSEMOTION:
                 # Game state specific mouse motion
-                if current_state == GameState.GAME:
+                if current_state == GameState.GAME and self.use_mouse_controls:
                     self._handle_game_mousemotion(event, mouse_pos)
                     
             # Mouse button up events
             elif event.type == pygame.MOUSEBUTTONUP:
                 # Game state specific mouse up events
-                if current_state == GameState.GAME:
+                if current_state == GameState.GAME and self.use_mouse_controls:
                     self._handle_game_mouseup(event, mouse_pos)
         
         return True
@@ -1026,6 +1399,12 @@ class Game:
             self.level_start_time = time.time()
             self.level_playable = False
         
+        # Toggle control scheme
+        elif event.key == pygame.K_t:
+            self.use_mouse_controls = not self.use_mouse_controls
+            control_type = "Mouse Aiming" if self.use_mouse_controls else "Keyboard"
+            self.ui_manager.add_toast(f"Controls: {control_type}", 2.0, BLUE)
+    
     def _handle_game_mousedown(self, event, mouse_pos):
         """Handle mouse down events in the game state."""
         if event.button == 1:  # Left mouse button
@@ -1052,9 +1431,39 @@ class Game:
                 # Calculate force direction and magnitude
                 force_x = (self.aim_start_pos[0] - self.aim_end_pos[0]) * 0.1
                 force_y = (self.aim_start_pos[1] - self.aim_end_pos[1]) * 0.1
+                force_magnitude = math.sqrt(force_x**2 + force_y**2)
                 
-                # Apply force to ball
-                ball.apply_force(force_x, force_y)
+                # Check if we have enough energy
+                energy_cost = force_magnitude * FORCE_COST
+                if self.energy >= energy_cost:
+                    # Apply force to ball
+                    ball.apply_force(force_x, force_y)
+                    
+                    # Reduce energy
+                    self.energy -= energy_cost
+                    self.energy_used += energy_cost
+                    
+                    # Count as a move
+                    self.moves_made += 1
+                    
+                    # Create force trail particles
+                    if self.particle_system:
+                        direction = normalize_vector(force_x, force_y)
+                        if direction:  # Check if direction is not None
+                            self.particle_system.create_particles(
+                                ball.x, ball.y,
+                                int(force_magnitude * 2),  # More particles for stronger forces
+                                (200, 200, 255),
+                                min_speed=force_magnitude * 5,
+                                max_speed=force_magnitude * 10,
+                                min_lifetime=0.2,
+                                max_lifetime=0.5,
+                                direction=(-direction[0], -direction[1]),  # Opposite of force direction
+                                spread=0.5
+                            )
+                else:
+                    # Not enough energy - show notification
+                    self.ui_manager.add_toast("Not enough energy!", 1.5, RED)
 
     def _draw_background(self, camera_offset):
         """Draw the background grid and boundaries."""
@@ -1140,3 +1549,78 @@ class Game:
             world_rect,
             BOUNDARY_THICKNESS
         )
+
+    def _enforce_ball_boundaries(self):
+        """Keep the ball within the game world and camera view."""
+        if not self.level_manager.get_ball():
+            return
+            
+        ball = self.level_manager.get_ball()
+        
+        # Define world boundaries with some padding
+        padding = ball.radius * 2
+        min_x = padding
+        min_y = padding
+        max_x = self.world_width - padding
+        max_y = self.world_height - padding
+        
+        # Check if ball is outside boundaries
+        if ball.x < min_x or ball.x > max_x or ball.y < min_y or ball.y > max_y:
+            # If ball is outside valid area, reset to a safe position
+            if ball.x < min_x: ball.x = min_x
+            if ball.x > max_x: ball.x = max_x
+            if ball.y < min_y: ball.y = min_y
+            if ball.y > max_y: ball.y = max_y
+            
+            # Stop ball movement
+            ball.vel_x = 0
+            ball.vel_y = 0
+            
+            # Update camera
+            self.camera.set_target_position((ball.x, ball.y))
+            
+            # Show toast notification
+            if hasattr(self, 'ui_manager'):
+                self.ui_manager.add_toast("Ball out of bounds!", 2.0, (255, 100, 100))
+
+    def reset_for_state_change(self, new_state):
+        """Reset game objects when changing state."""
+        # Clear any floating text
+        if hasattr(self, 'floating_texts'):
+            self.floating_texts = []
+        
+        # Reset screen shake
+        if hasattr(self, 'screen_shake_amount'):
+            self.screen_shake_amount = 0
+        
+        # Clear cached render surfaces
+        if hasattr(self, 'alpha_surface'):
+            self.alpha_surface.fill((0, 0, 0, 0))
+        
+        # Reset camera for certain state changes
+        if new_state == GameState.GAME:
+            if hasattr(self, 'camera'):
+                self.camera.reset()
+            
+            # If we have a ball, update camera to focus on it
+            if self.level_manager and self.level_manager.get_ball():
+                ball_pos = self.level_manager.get_ball().get_position()
+                if hasattr(self, 'camera'):
+                    self.camera.set_target_position((ball_pos[0] - WIDTH/2, ball_pos[1] - HEIGHT/2))
+        
+        # Reset game-specific properties based on state
+        if new_state == GameState.GAME:
+            # Reset game state for gameplay
+            self.level_playable = False
+            self.level_complete = False
+            self.level_start_time = time.time()
+            
+        elif new_state == GameState.MAIN_MENU:
+            # Reset for main menu
+            pass
+            
+        elif new_state == GameState.LEVEL_COMPLETE:
+            # Specific handling for level complete
+            pass
+            
+        print(f"Game reset for state change to {new_state}")

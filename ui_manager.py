@@ -5,6 +5,7 @@ from ui.button import Button
 from ui.slider import Slider
 from ui.toast import Toast
 from utils.constants import WIDTH, HEIGHT, WHITE, BLACK, BLUE, GREEN, RED, YELLOW
+import time
 
 class UIManager:
     def __init__(self):
@@ -106,42 +107,36 @@ class UIManager:
             
             # Create level buttons
             levels_per_row = 5
-            button_width = 80
-            button_height = 80
+            button_size = 80
             padding = 20
-            start_x = (WIDTH - (levels_per_row * (button_width + padding) - padding)) // 2
-            start_y = 120
+            start_x = (WIDTH - (button_size * levels_per_row + padding * (levels_per_row - 1))) // 2
+            start_y = 150
             
-            unlocked_level = self.game.level_manager.levels_data.get("unlocked", 1)
+            unlocked = self.game.level_manager.levels_data.get("unlocked", 1)
             
-            for i in range(1, 21):  # Show max 20 levels
+            for i in range(1, self.game.level_manager.max_level + 1):
                 row = (i - 1) // levels_per_row
                 col = (i - 1) % levels_per_row
                 
-                x = start_x + col * (button_width + padding)
-                y = start_y + row * (button_height + padding)
+                x = start_x + col * (button_size + padding)
+                y = start_y + row * (button_size + padding)
                 
-                # Calculate stars (if any)
-                stars = self.game.level_manager.levels_data.get("stars", {}).get(str(i), 0)
+                # Determine if level is locked
+                is_locked = i > unlocked
                 
-                # Create button text with stars
-                button_text = f"{i}\n"
-                if stars > 0:
-                    button_text += "★" * stars + "☆" * (3 - stars)
-                
-                # Level button
+                # Create level button
                 level_button = Button(
-                    x, y,
-                    button_width, button_height,
+                    x + button_size // 2, y + button_size // 2,
+                    button_size, button_size,
                     str(i),
                     font=self.fonts['normal'],
-                    callback=lambda level=i: self._start_level(level) if level <= unlocked_level else None,
-                    disabled=i > unlocked_level,
-                    bg_color=GREEN if i <= unlocked_level else BLUE
+                    callback=lambda level=i: self._start_level(level),
+                    disabled=is_locked,
+                    color=(100, 100, 100) if is_locked else (0, 100, 200)
                 )
                 
                 self.ui_elements.append(level_button)
-            
+                
         elif state == GameState.SETTINGS:
             # Create settings UI elements
             back_button = Button(
@@ -267,12 +262,19 @@ class UIManager:
             unlocked = self.game.level_manager.levels_data.get("unlocked", 1)
             next_level_available = next_level <= unlocked
             
+            # Create a method to handle next level transition properly
+            def go_to_next_level():
+                print("Next level button clicked")
+                if self.game.level_manager.next_level():
+                    return True
+                return False
+            
             next_level_button = Button(
                 WIDTH // 2, HEIGHT // 2 + 60,
                 200, 50,
                 "Next Level" if next_level_available else "Next Level (Locked)",
                 font=self.fonts['normal'],
-                callback=lambda: self.game.level_manager.setup_level(next_level) and self.game.state_manager.change_state(GameState.GAME),
+                callback=go_to_next_level,
                 disabled=not next_level_available
             )
             
@@ -391,11 +393,20 @@ class UIManager:
         )
     
     def _start_level(self, level):
-        """Set up and start a level."""
-        # Set up the level entities
-        self.game.level_manager.setup_level(level)
-        # Change game state to start the game
+        """Start the specified level."""
+        # Change state to game
         self.game.state_manager.change_state(GameState.GAME)
+        
+        # Setup level
+        self.game._start_level(level)
+    
+    def _transition_to_next_level(self):
+        """Handle transition to the next level."""
+        print("Transition to next level called from UI manager")
+        
+        # Simply call the level_manager's next_level method
+        # which now handles all of the state transition and cleanup
+        return self.game.level_manager.next_level()
     
     def handle_event(self, event):
         """Handle UI events and return True if the event was handled by UI."""
@@ -405,4 +416,9 @@ class UIManager:
                 if element.handle_event(event):
                     return True
         
-        return False 
+        return False
+    
+    def clear_ui_elements(self):
+        """Clear all UI elements."""
+        self.ui_elements = []
+        self.toasts = [] 

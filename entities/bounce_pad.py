@@ -6,7 +6,7 @@ from utils.constants import ORANGE, WHITE, YELLOW
 class BouncePad:
     """A surface that bounces the ball in a specific direction."""
     
-    def __init__(self, x: int, y: int, width: int, height: int, strength: float = 1.5, angle: float = 90):
+    def __init__(self, x, y, width=60, height=15, angle=0, strength=1.5, color=(0, 200, 255)):
         """
         Initialize a new bounce pad.
         
@@ -15,30 +15,33 @@ class BouncePad:
             y: Center y position
             width: Width of the bounce pad
             height: Height of the bounce pad
+            angle: Angle in degrees (0 = right, 180 = left, 270 = down)
             strength: Bounce strength multiplier
-            angle: Angle in degrees (90 = up, 0 = right, 180 = left, 270 = down)
+            color: Color of the bounce pad
         """
         self.x = x
         self.y = y
         self.width = width
         self.height = height
-        self.strength = strength
-        self.rect = pygame.Rect(x, y, width, height)
+        self.angle = angle  # Angle in degrees
+        self.strength = strength  # Bounce strength multiplier
+        self.color = color
         
-        # Convert angle to direction vector
-        angle_rad = math.radians(angle)
-        self.direction = [math.cos(angle_rad), -math.sin(angle_rad)]  # Negative y because pygame y increases downward
-        
-        self.active = True
-        self.color = (255, 165, 0)  # Orange
-        self.activated = False
-        self.activation_timer = 0
-        self.activation_duration = 0.3
-        
-        # Animation properties
-        self.time = 0
+        # Visual properties
+        self.active = False
         self.active_time = 0
         self.activate_cooldown = 0
+        self.pulse_timer = 0
+        
+        # Calculate bounce direction from angle
+        angle_rad = math.radians(angle)
+        self.direction = (math.cos(angle_rad), math.sin(angle_rad))
+        
+        # Create rectangle for collision detection
+        self.rect = pygame.Rect(x - width // 2, y - height // 2, width, height)
+        
+        # Rotate rectangle to match angle
+        self.points = self._get_rotated_points()
         
         # Precompute half dimensions for faster collision checks
         self.half_width = width / 2
@@ -50,7 +53,7 @@ class BouncePad:
     
     def update(self, dt: float) -> None:
         """Update the bounce pad animation."""
-        self.time += dt
+        self.pulse_timer += dt
         
         # Update activation animation
         if self.active:
@@ -71,9 +74,9 @@ class BouncePad:
         
         # Base rectangle
         # Calculate color pulsation for the pad
-        pulse = math.sin(self.time * 5) * 0.2
+        pulse = math.sin(self.pulse_timer * 5) * 0.2
         color_value = int(255 * (0.8 + pulse))
-        pad_color = (ORANGE[0], color_value, ORANGE[2])
+        pad_color = (self.color[0], color_value, self.color[2])
         
         # Create rectangle for the pad
         rect = pygame.Rect(
@@ -164,22 +167,59 @@ class BouncePad:
         
         return False
     
-    def _bounce_ball(self, ball) -> None:
+    def _bounce_ball(self, ball):
         """Apply bounce effect to the ball."""
-        if self.activate_cooldown <= 0:
-            # Calculate more satisfying bounce
-            current_speed = math.sqrt(ball.vel_x**2 + ball.vel_y**2)
+        # Calculate current ball speed
+        current_speed = math.sqrt(ball.vel_x**2 + ball.vel_y**2)
+        
+        # Skip tiny speeds
+        if current_speed < 0.1:
+            return
             
-            # Minimum bounce speed ensures consistency
-            bounce_speed = max(current_speed * self.strength, 200)
+        # Get bounce strength as a float (handle cases where it might be a tuple or list)
+        bounce_strength = self.strength
+        if isinstance(bounce_strength, (list, tuple)):
+            if len(bounce_strength) > 0:
+                bounce_strength = float(bounce_strength[0])
+            else:
+                bounce_strength = 1.5  # Default value
+        elif not isinstance(bounce_strength, (int, float)):
+            bounce_strength = 1.5  # Default value for unknown types
+        
+        # Calculate bounce speed
+        bounce_speed = max(current_speed * bounce_strength, 200.0)
+        
+        # Get normalized direction based on bounce pad angle
+        angle_rad = math.radians(self.angle)
+        direction_x = math.cos(angle_rad)
+        direction_y = math.sin(angle_rad)
+        
+        # Apply bounce velocity
+        ball.vel_x = direction_x * bounce_speed
+        ball.vel_y = direction_y * bounce_speed
+        
+        # Add visual feedback
+        if hasattr(ball, 'game') and ball.game and hasattr(ball.game, 'particle_system'):
+            # Create bounce particles
+            opposite_dir_x = -direction_x
+            opposite_dir_y = -direction_y
             
-            ball.vel_x = self.direction[0] * bounce_speed
-            ball.vel_y = self.direction[1] * bounce_speed
+            # Position particles at the bounce point (edge of bounce pad)
+            particle_x = self.x + (self.width / 2) * direction_x
+            particle_y = self.y + (self.height / 2) * direction_y
             
-            # Activate visual effect
-            self.active = True
-            self.active_time = 0
-            self.activate_cooldown = 0.1  # Prevent rapid consecutive bounces 
+            # Create particles
+            ball.game.particle_system.create_particles(
+                particle_x, particle_y,
+                15,  # Number of particles
+                self.color,  # Use bounce pad color
+                min_speed=50,
+                max_speed=150,
+                min_lifetime=0.2,
+                max_lifetime=0.6,
+                direction=(opposite_dir_x, opposite_dir_y),
+                spread=1.2  # Wide spread
+            )
     
     def get_position(self):
         """Return the current position of the bounce pad."""
@@ -189,3 +229,24 @@ class BouncePad:
         """Set the position of the bounce pad."""
         self.x, self.y = position
         self.rect.x, self.rect.y = position 
+
+    def _get_rotated_points(self):
+        """Return the rotated points of the bounce pad."""
+        # Calculate the rotated points of the rectangle
+        angle_rad = math.radians(self.angle)
+        cos_angle = math.cos(angle_rad)
+        sin_angle = math.sin(angle_rad)
+        
+        # Calculate the rotated points
+        points = [
+            (self.x - self.half_width * cos_angle - self.half_height * sin_angle,
+             self.y - self.half_width * sin_angle + self.half_height * cos_angle),
+            (self.x + self.half_width * cos_angle - self.half_height * sin_angle,
+             self.y + self.half_width * sin_angle + self.half_height * cos_angle),
+            (self.x + self.half_width * cos_angle + self.half_height * sin_angle,
+             self.y + self.half_width * sin_angle - self.half_height * cos_angle),
+            (self.x - self.half_width * cos_angle + self.half_height * sin_angle,
+             self.y - self.half_width * sin_angle - self.half_height * cos_angle)
+        ]
+        
+        return points 

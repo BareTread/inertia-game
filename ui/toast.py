@@ -54,7 +54,7 @@ class Toast:
     
     def draw(self, surface: pygame.Surface, position: Tuple[int, int]) -> None:
         """
-        Draw the toast notification to the surface.
+        Draw the toast notification with improved visuals.
         
         Args:
             surface: Surface to draw on
@@ -63,31 +63,47 @@ class Toast:
         # Create a surface for the toast
         toast_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
         
-        # Draw background
-        if len(self.bg_color) == 4:
-            # RGBA background
-            pygame.draw.rect(toast_surface, self.bg_color, 
-                            (0, 0, self.width, self.height), border_radius=5)
-        else:
-            # RGB background with set alpha
-            pygame.draw.rect(toast_surface, (*self.bg_color, self.alpha), 
-                            (0, 0, self.width, self.height), border_radius=5)
+        # Draw background with gradient
+        for i in range(self.height):
+            # Create gradient from top to bottom
+            alpha = int(self.alpha * (0.7 + 0.3 * (1 - i / self.height)))
+            if len(self.bg_color) == 3:
+                color = (*self.bg_color, alpha)
+            else:
+                # Use alpha from bg_color but scale it by our fade effect
+                color = (*self.bg_color[:3], int(self.bg_color[3] * self.alpha / 255))
+            pygame.draw.line(toast_surface, color, (0, i), (self.width, i))
         
-        # Draw text with alpha
-        text_alpha_surface = pygame.Surface(self.text_rect.size, pygame.SRCALPHA)
-        text_alpha_surface.fill((255, 255, 255, self.alpha))
+        # Draw rounded rectangle border
+        border_color = (*self.color[:3], self.alpha)
+        pygame.draw.rect(toast_surface, border_color, 
+                        (0, 0, self.width, self.height), width=2, border_radius=5)
         
-        # Create a copy of the text surface with current alpha
-        text_surface_with_alpha = self.text_surface.copy()
-        text_surface_with_alpha.blit(text_alpha_surface, (0, 0), 
-                                    special_flags=pygame.BLEND_RGBA_MULT)
+        # Draw text with shadow
+        shadow_surface = self.font.render(self.message, True, (0, 0, 0, self.alpha))
+        text_surface = self.font.render(self.message, True, (*self.color[:3], self.alpha))
         
-        # Blit text to toast
-        toast_surface.blit(text_surface_with_alpha, 
-                          (self.padding, self.padding))
+        # Position text in center
+        text_x = (self.width - text_surface.get_width()) // 2
+        text_y = (self.height - text_surface.get_height()) // 2
         
-        # Blit toast to surface
-        surface.blit(toast_surface, position)
+        # Draw shadow slightly offset
+        toast_surface.blit(shadow_surface, (text_x + 1, text_y + 1))
+        toast_surface.blit(text_surface, (text_x, text_y))
+        
+        # Add a slight bounce effect when appearing/disappearing
+        y_offset = 0
+        if self.time_remaining > self.duration - 0.3:
+            # Appearing
+            progress = (self.duration - self.time_remaining) / 0.3
+            y_offset = int(10 * (1 - progress))
+        elif self.time_remaining < 0.3:
+            # Disappearing
+            progress = self.time_remaining / 0.3
+            y_offset = int(10 * (1 - progress))
+        
+        # Draw the toast with the bounce effect
+        surface.blit(toast_surface, (position[0], position[1] - y_offset))
     
     def should_remove(self) -> bool:
         """

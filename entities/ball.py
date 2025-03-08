@@ -1,5 +1,6 @@
 import pygame
 import math
+import random
 from utils.constants import WIDTH, HEIGHT, WHITE, RED, BLUE, FRICTION
 from utils.helpers import clamp
 from utils.constants import MIN_FORCE_THRESHOLD, MAX_FORCE, MAX_SHAKE
@@ -59,40 +60,124 @@ class Ball:
         # Calculate force magnitude
         magnitude = math.sqrt(force_x**2 + force_y**2)
         
+        # Skip if force is negligible
+        if magnitude < 0.05:
+            return
+            
         # Apply minimum force threshold
         if magnitude < 0.1:  # Minimum threshold
-            if magnitude > 0:
-                # Scale up to minimum threshold while preserving direction
-                force_x = force_x * (0.1 / magnitude)
-                force_y = force_y * (0.1 / magnitude)
-                magnitude = 0.1
+            # Scale up to minimum threshold while preserving direction
+            force_x = force_x * (0.1 / magnitude)
+            force_y = force_y * (0.1 / magnitude)
+            magnitude = 0.1
             
-        # Apply force with "weight" feel
-        force_multiplier = 1.2  # Slightly increase impact
-        self.vel_x += force_x * force_multiplier * self.mass_inverse
-        self.vel_y += force_y * force_multiplier * self.mass_inverse
+        # Calculate current speed
+        current_speed = math.sqrt(self.vel_x**2 + self.vel_y**2)
+        max_speed = 10.0  # Maximum velocity
         
-        # Add extra push when starting from rest
-        if abs(self.vel_x) < 0.1 and abs(self.vel_y) < 0.1:
-            self.vel_x += force_x * 0.3
-            self.vel_y += force_y * 0.3
+        # Only apply force if not already at max speed
+        if current_speed < max_speed:
+            # Apply force with weight feel and variable force multiplier
+            # Lower multiplier at higher speeds for better control
+            force_multiplier = 2.0 - min(1.5, current_speed / max_speed)
+            
+            # Apply force
+            self.vel_x += force_x * force_multiplier * self.mass_inverse
+            self.vel_y += force_y * force_multiplier * self.mass_inverse
+            
+            # Add extra push when starting from rest
+            if current_speed < 0.5:
+                boost_factor = 0.5 * (1.0 - current_speed / 0.5)
+                self.vel_x += force_x * boost_factor
+                self.vel_y += force_y * boost_factor
         
-        # Apply velocity bounds (same as in Ball class)
-        max_velocity = 15.0
-        if abs(self.vel_x) > max_velocity:
-            self.vel_x = max_velocity * (1 if self.vel_x > 0 else -1)
-        if abs(self.vel_y) > max_velocity:
-            self.vel_y = max_velocity * (1 if self.vel_y > 0 else -1)
+        # Create particle effect for thrust if game is available
+        if hasattr(self, 'game') and self.game and hasattr(self.game, 'particle_system'):
+            # Calculate direction for particles (opposite to force)
+            if magnitude > 0:
+                direction = (-force_x / magnitude, -force_y / magnitude)
+                particle_count = int(min(5, magnitude * 5))
+                
+                # Create particles in opposite direction to force
+                self.game.particle_system.create_particles(
+                    self.x, self.y,
+                    particle_count,
+                    (100, 100, 255),  # Blue thrust
+                    min_speed=50,
+                    max_speed=150,
+                    min_lifetime=0.1,
+                    max_lifetime=0.3,
+                    direction=direction,
+                    spread=0.3
+                )
+        
+        # Apply velocity bounds
+        new_speed = math.sqrt(self.vel_x**2 + self.vel_y**2)
+        if new_speed > max_speed:
+            scale = max_speed / new_speed
+            self.vel_x *= scale
+            self.vel_y *= scale
+    
+    def brake(self):
+        """Apply braking to slow down the ball."""
+        # Calculate current speed
+        speed = math.sqrt(self.vel_x**2 + self.vel_y**2)
+        
+        # Only brake if moving
+        if speed > 0.1:
+            # Apply strong braking force
+            brake_factor = 0.85  # Reduce velocity by 15% per frame
+            self.vel_x *= brake_factor
+            self.vel_y *= brake_factor
+            
+            # Create brake particle effect
+            if hasattr(self, 'game') and self.game and hasattr(self.game, 'particle_system'):
+                # Create particles in the direction opposite to movement
+                if speed > 0.5:
+                    direction_x = -self.vel_x / speed
+                    direction_y = -self.vel_y / speed
+                    
+                    # Create more particles for higher speeds
+                    particle_count = int(min(8, speed * 2))
+                    
+                    # Use red/orange particles for braking
+                    brake_color = (255, 100, 50)
+                    
+                    for _ in range(particle_count):
+                        angle_variance = math.radians(random.uniform(-15, 15))
+                        dir_x = direction_x * math.cos(angle_variance) - direction_y * math.sin(angle_variance)
+                        dir_y = direction_x * math.sin(angle_variance) + direction_y * math.cos(angle_variance)
+                        
+                        self.game.particle_system.add_particle(
+                            self.x, self.y,
+                            dir_x * random.uniform(10, 30),
+                            dir_y * random.uniform(10, 30),
+                            brake_color,
+                            random.uniform(2, 4),
+                            random.uniform(0.2, 0.4),
+                            fade_mode="late",
+                            glow=True
+                        )
     
     def update(self, dt, friction=FRICTION):
-        """Update with improved physics"""
+        """Update with improved physics."""
         # Store previous position for collision resolution
         self.prev_x = self.x
         self.prev_y = self.y
         
-        # Calculate current speed for physics adjustments
+        # Calculate current speed
         speed = math.sqrt(self.vel_x**2 + self.vel_y**2)
-        damping = 0.99 if speed < 5 else 0.98  # More damping at higher speeds
+        
+        # Apply variable damping based on speed
+        if speed > 10.0:
+            # More damping at high speeds
+            damping = 0.97
+        elif speed > 5.0:
+            # Medium damping at medium speeds
+            damping = 0.98
+        else:
+            # Less damping at low speeds
+            damping = 0.99
         
         # Use surface friction if available
         effective_friction = self.current_surface_friction if self.current_surface_friction is not None else friction
@@ -105,8 +190,8 @@ class Ball:
         self.vel_x *= effective_friction * damping
         self.vel_y *= effective_friction * damping
         
-        # Stop if very slow
-        if abs(self.vel_x) < 0.05 and abs(self.vel_y) < 0.05:
+        # Stop if very slow (prevent endless drifting)
+        if speed < 0.05:
             self.vel_x = 0
             self.vel_y = 0
         

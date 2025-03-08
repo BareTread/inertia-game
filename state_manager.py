@@ -39,6 +39,10 @@ class StateManager:
 
     def change_state(self, new_state: GameState) -> None:
         """Change to a new state, replacing the current one."""
+        # Clear all UI elements before changing state
+        if self.game and hasattr(self.game, 'ui_manager'):
+            self.game.ui_manager.clear_ui_elements()
+        
         # Save current state to history
         if self.state_stack:
             self.history.append(self.state_stack.pop())
@@ -49,9 +53,15 @@ class StateManager:
         # Call transition handler if available
         self._handle_transition(new_state)
         
+        # Reset any game objects that should be reset on state change
+        if self.game and hasattr(self.game, 'reset_for_state_change'):
+            self.game.reset_for_state_change(new_state)
+        
         # Update UI for the new state
         if self.game and hasattr(self.game, 'ui_manager'):
             self.game.ui_manager.setup_for_state(new_state)
+            
+        print(f"State changed to {new_state}")
 
     def push_state(self, new_state: GameState) -> None:
         """Push a new state onto the stack without removing the current one."""
