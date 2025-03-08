@@ -151,14 +151,34 @@ class ParticleSystem:
     def __init__(self, max_particles=1000):
         self.particles = []
         self.max_particles = max_particles
+        self.shake_amount = 0
+        self.shake_duration = 0
     
     def update(self, dt):
         """Update all particles in the system."""
-        # Update existing particles
-        for particle in self.particles[:]:
+        # Cap maximum particles to ensure performance
+        MAX_PARTICLES = 500
+        if len(self.particles) > MAX_PARTICLES:
+            # Remove oldest particles when we exceed the limit
+            self.particles = self.particles[-MAX_PARTICLES:]
+        
+        # Update particles with batch processing
+        particles_to_keep = []
+        for particle in self.particles:
             particle.update(dt)
-            if particle.dead:
-                self.particles.remove(particle)
+            if not particle.dead:
+                particles_to_keep.append(particle)
+        
+        self.particles = particles_to_keep
+        
+        # Update screen shake effect
+        if self.shake_duration > 0:
+            self.shake_duration -= dt
+            if self.shake_duration <= 0:
+                self.shake_amount = 0
+            else:
+                # Gradually reduce shake intensity
+                self.shake_amount *= 0.9
     
     def draw(self, surface):
         """Draw all particles in the system."""
@@ -351,4 +371,136 @@ class ParticleSystem:
                     0, "smooth", True, 
                     random.uniform(0, math.pi * 2),
                     rotation_speed * (1 - delay_factor) * 0.7  # Reduced rotation speed by 30%
-                ) 
+                )
+    
+    def create_force_trail(self, position, direction, magnitude):
+        """Creates particles showing the direction of force application.
+        
+        Args:
+            position: (x, y) tuple of the starting position
+            direction: Normalized [dx, dy] direction vector
+            magnitude: Strength of the force
+        """
+        # Determine number of particles based on force magnitude
+        num_particles = int(min(magnitude * 5, 20))  # Cap at 20 particles
+        
+        # Generate appropriate color based on force magnitude
+        if magnitude < 1.0:
+            color = (200, 200, 255)  # Light blue for low force
+        elif magnitude < 2.0:
+            color = (100, 100, 255)  # Medium blue for medium force
+        elif magnitude < 3.0:
+            color = (50, 50, 255)    # Deep blue for strong force
+        else:
+            color = (50, 50, 255)    # Deep blue with white trail for very strong force
+            
+        for _ in range(num_particles):
+            # Create particles along the force direction
+            offset_x = random.uniform(-2, 2) + (direction[0] * random.uniform(0, 10))
+            offset_y = random.uniform(-2, 2) + (direction[1] * random.uniform(0, 10))
+            
+            # Randomize velocity slightly
+            vel_x = direction[0] * random.uniform(20, 50) * (magnitude / 2)
+            vel_y = direction[1] * random.uniform(20, 50) * (magnitude / 2)
+            
+            # Create particle with appropriate lifetime
+            lifetime = random.uniform(0.2, 0.5)
+            
+            # Add some glow for stronger forces
+            glow = magnitude > 2.0
+            
+            self.add_particle(
+                position[0] + offset_x, 
+                position[1] + offset_y,
+                vel_x, vel_y,
+                color,
+                random.uniform(2, 4),
+                lifetime,
+                gravity=0,
+                fade_mode="late",
+                glow=glow
+            )
+            
+    def screen_shake(self, amount):
+        """Add screen shake effect.
+        
+        Args:
+            amount: Intensity of the screen shake (0.0 to 1.0)
+        """
+        # Only add shake if it's stronger than current
+        if amount > self.shake_amount:
+            self.shake_amount = amount
+            self.shake_duration = 0.3  # 300ms of shake
+            
+            # Add particles around the edges for stronger shakes
+            if amount > 0.3:
+                self.add_screen_shake_particles(int(amount * 10))
+    
+    def create_force_indicator(self, start_pos, direction, magnitude):
+        """Create visual indicator when applying force."""
+        from utils.helpers import map_range
+        
+        # Calculate end position
+        end_x = start_pos[0] + direction[0] * magnitude * 5  # Scale for visibility
+        end_y = start_pos[1] + direction[1] * magnitude * 5
+        
+        # Create particles along the line
+        steps = max(5, int(magnitude * 2))
+        for i in range(steps):
+            # Position along the line
+            t = i / (steps - 1)
+            x = start_pos[0] + (end_x - start_pos[0]) * t
+            y = start_pos[1] + (end_y - start_pos[1]) * t
+            
+            # Create particle
+            size = map_range(i, 0, steps-1, 4, 1)  # Larger at the start
+            lifetime = map_range(i, 0, steps-1, 0.5, 0.2)  # Longer at the start
+            
+            self.add_particle(
+                x, y,
+                direction[0] * -0.5, direction[1] * -0.5,
+                (255, 255, 255),
+                size,
+                lifetime,
+                fade_mode="smooth"
+            )
+    
+    def create_impact(self, x, y, num_particles=10, color=(255, 255, 255), 
+                     velocity=None, size_range=(1, 3), lifetime_range=(0.2, 0.8)):
+        """Create impact particles from collision."""
+        import random
+        import math
+        
+        for _ in range(num_particles):
+            # Random angle for particle direction
+            angle = random.uniform(0, math.pi * 2)
+            speed = random.uniform(50, 150)
+            
+            # Calculate velocity
+            vel_x = math.cos(angle) * speed
+            vel_y = math.sin(angle) * speed
+            
+            # Apply base velocity if provided
+            if velocity:
+                vel_x += velocity[0] * random.uniform(0.5, 1.5)
+                vel_y += velocity[1] * random.uniform(0.5, 1.5)
+            
+            # Random size and lifetime
+            size = random.uniform(size_range[0], size_range[1])
+            lifetime = random.uniform(lifetime_range[0], lifetime_range[1])
+            
+            # Randomize color slightly
+            r = min(255, max(0, color[0] + random.randint(-20, 20)))
+            g = min(255, max(0, color[1] + random.randint(-20, 20)))
+            b = min(255, max(0, color[2] + random.randint(-20, 20)))
+            
+            # Create the particle
+            self.add_particle(
+                x, y,
+                vel_x, vel_y,
+                (r, g, b),
+                size,
+                lifetime,
+                gravity=100,
+                fade_mode="smooth"
+            ) 

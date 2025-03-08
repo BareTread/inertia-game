@@ -7,13 +7,16 @@ class Button:
     def __init__(self, x, y, width, height, text, font=None, text_color=WHITE, 
                  bg_color=(100, 100, 100), hover_color=(150, 150, 150), 
                  border_color=(200, 200, 200), border_width=2, 
-                 callback=None, padding=10):
+                 callback=None, padding=10, disabled=False):
         self.x = x
         self.y = y
         self.width = width
         self.height = height
         self.text = text
-        self.font = font or pygame.font.Font(None, 32)
+        if font is None:
+            self.font = pygame.font.Font(None, 32)
+        else:
+            self.font = font
         self.text_color = text_color
         self.bg_color = bg_color
         self.hover_color = hover_color
@@ -23,7 +26,7 @@ class Button:
         self.padding = padding
         self.hovered = False
         self.pressed = False
-        self.disabled = False
+        self.disabled = disabled
         
         # Create the rectangle
         self.rect = pygame.Rect(
@@ -55,6 +58,31 @@ class Button:
                 self.callback()
             return True
             
+        return False
+    
+    def handle_event(self, event):
+        """Handle pygame events for the button."""
+        if self.disabled:
+            return False
+            
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            # Check if mouse is over the button
+            mouse_pos = pygame.mouse.get_pos()
+            if self.rect.collidepoint(mouse_pos):
+                self.pressed = True
+                return True
+                
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            # Check if button was pressed and mouse is still over it
+            mouse_pos = pygame.mouse.get_pos()
+            was_pressed = self.pressed
+            self.pressed = False
+            
+            if was_pressed and self.rect.collidepoint(mouse_pos):
+                if self.callback:
+                    self.callback()
+                return True
+                
         return False
     
     def draw(self, surface):

@@ -2,8 +2,8 @@ from enum import Enum
 import pygame
 
 # Game Constants
-WIDTH = 800
-HEIGHT = 600
+WIDTH = 1280
+HEIGHT = 720
 FPS = 60
 TITLE = "Inertia Deluxe"
 FRICTION = 0.99
@@ -15,6 +15,11 @@ LEVELS_FILE = "data/levels.json"
 SETTINGS_FILE = "data/settings.json"
 MAX_LEVELS = 30
 REQUIRED_STARS_TO_UNLOCK = 2
+
+# Physics constants
+MIN_FORCE_THRESHOLD = 0.5
+MAX_FORCE = 10.0
+MAX_SHAKE = 0.5
 
 # Game State Enum
 class GameState(Enum):
@@ -89,4 +94,15 @@ MASTERY_REWARDS = {
     "energy": ["small_glow", "medium_glow", "large_glow", "energy_aura"],
     "precision": ["bronze_spark", "silver_spark", "gold_spark", "diamond_spark"],
     "targets": ["green_pulse", "yellow_pulse", "orange_pulse", "red_pulse"]
-} 
+}
+
+# Grid and background settings
+GRID_SIZE = 40
+GRID_COLOR = (40, 40, 50)  # Slightly lighter gray for better visibility
+BACKGROUND_COLOR = (15, 15, 25)  # Very dark blue-black, slightly lighter for contrast
+BOUNDARY_COLOR = (40, 40, 100)  # Blue-ish border
+BOUNDARY_THICKNESS = 3
+
+# Wall settings
+WALL_BORDER_COLOR = (100, 100, 220)  # Light blue border
+WALL_BORDER_WIDTH = 2 

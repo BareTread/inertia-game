@@ -1,17 +1,8 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Inertia Deluxe - A physics-based puzzle game
-
-This is the main entry point for the game.
-"""
-
-import os
+import pygame
 import sys
 import traceback
-import pygame
+import os
 from game import Game
-
 
 def main():
     """Main entry point for the game."""
@@ -27,7 +18,6 @@ def main():
             icon = pygame.image.load(os.path.join("assets", "images", "icon.png"))
             pygame.display.set_icon(icon)
         except:
-            # Continue without icon if it can't be loaded
             print("Warning: Could not load icon.")
             
         # Create and run the game
@@ -49,6 +39,5 @@ def main():
     
     return 0
 
-
 if __name__ == "__main__":
-    sys.exit(main()) 
+    sys.exit(main())

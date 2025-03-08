@@ -6,8 +6,7 @@ from utils.constants import ORANGE, WHITE, YELLOW
 class BouncePad:
     """A surface that bounces the ball in a specific direction."""
     
-    def __init__(self, x: int, y: int, width: int, height: int, 
-                 direction: Tuple[float, float] = (0, -1), strength: float = 1.5):
+    def __init__(self, x: int, y: int, width: int, height: int, strength: float = 1.5, angle: float = 90):
         """
         Initialize a new bounce pad.
         
@@ -16,26 +15,28 @@ class BouncePad:
             y: Center y position
             width: Width of the bounce pad
             height: Height of the bounce pad
-            direction: Direction to bounce the ball (normalized vector)
             strength: Bounce strength multiplier
+            angle: Angle in degrees (90 = up, 0 = right, 180 = left, 270 = down)
         """
         self.x = x
         self.y = y
         self.width = width
         self.height = height
-        
-        # Normalize direction vector
-        magnitude = math.sqrt(direction[0]**2 + direction[1]**2)
-        if magnitude == 0:
-            self.direction = (0, -1)  # Default to upward if zero vector
-        else:
-            self.direction = (direction[0] / magnitude, direction[1] / magnitude)
-            
         self.strength = strength
+        self.rect = pygame.Rect(x, y, width, height)
+        
+        # Convert angle to direction vector
+        angle_rad = math.radians(angle)
+        self.direction = [math.cos(angle_rad), -math.sin(angle_rad)]  # Negative y because pygame y increases downward
+        
+        self.active = True
+        self.color = (255, 165, 0)  # Orange
+        self.activated = False
+        self.activation_timer = 0
+        self.activation_duration = 0.3
         
         # Animation properties
         self.time = 0
-        self.active = False
         self.active_time = 0
         self.activate_cooldown = 0
         
@@ -62,8 +63,12 @@ class BouncePad:
         if self.activate_cooldown > 0:
             self.activate_cooldown -= dt
     
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, camera_offset=(0, 0)) -> None:
         """Draw the bounce pad on the surface."""
+        # Calculate adjusted position
+        adjusted_x = self.x - camera_offset[0]
+        adjusted_y = self.y - camera_offset[1]
+        
         # Base rectangle
         # Calculate color pulsation for the pad
         pulse = math.sin(self.time * 5) * 0.2
@@ -72,8 +77,8 @@ class BouncePad:
         
         # Create rectangle for the pad
         rect = pygame.Rect(
-            self.x - self.half_width,
-            self.y - self.half_height,
+            adjusted_x - self.half_width,
+            adjusted_y - self.half_height,
             self.width,
             self.height
         )
@@ -83,7 +88,7 @@ class BouncePad:
         pygame.draw.rect(surface, WHITE, rect, 2)
         
         # Draw direction arrow
-        self._draw_direction_arrow(surface)
+        self._draw_direction_arrow(surface, camera_offset)
         
         # Draw activation effect
         if self.active:
@@ -92,8 +97,8 @@ class BouncePad:
             expansion_width = int(max(1, 5 - 20 * self.active_time))
             
             expanded_rect = pygame.Rect(
-                self.x - self.half_width - expansion_factor * 5,
-                self.y - self.half_height - expansion_factor * 5,
+                adjusted_x - self.half_width - expansion_factor * 5,
+                adjusted_y - self.half_height - expansion_factor * 5,
                 self.width + expansion_factor * 10,
                 self.height + expansion_factor * 10
             )
@@ -108,11 +113,15 @@ class BouncePad:
                                 expansion_width)
                 surface.blit(effect_surface, expanded_rect)
     
-    def _draw_direction_arrow(self, surface: pygame.Surface) -> None:
+    def _draw_direction_arrow(self, surface: pygame.Surface, camera_offset=(0, 0)) -> None:
         """Draw an arrow indicating the bounce direction."""
+        # Calculate adjusted position
+        adjusted_x = self.x - camera_offset[0]
+        adjusted_y = self.y - camera_offset[1]
+        
         # Calculate arrow start point at center of pad
-        start_x = self.x
-        start_y = self.y
+        start_x = adjusted_x
+        start_y = adjusted_y
         
         # Calculate arrow end point
         end_x = start_x + self.direction[0] * self.arrow_length
@@ -171,3 +180,12 @@ class BouncePad:
             self.active = True
             self.active_time = 0
             self.activate_cooldown = 0.1  # Prevent rapid consecutive bounces 
+    
+    def get_position(self):
+        """Return the current position of the bounce pad."""
+        return (self.x, self.y)
+    
+    def set_position(self, position):
+        """Set the position of the bounce pad."""
+        self.x, self.y = position
+        self.rect.x, self.rect.y = position 

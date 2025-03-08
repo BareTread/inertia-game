@@ -1,6 +1,6 @@
 import pygame
 import math
-from utils.constants import GREEN, RED
+from utils.constants import GREEN, RED, WIDTH, HEIGHT
 from utils.helpers import circle_circle_collision
 
 class Target:
@@ -25,26 +25,30 @@ class Target:
         self.pulse_timer += dt
         self.pulse_amount = math.sin(self.pulse_timer * 3) * 2
     
-    def draw(self, surface):
+    def draw(self, surface, camera_offset=(0, 0)):
         """Draw the target on the given surface."""
+        # Calculate adjusted position
+        adjusted_x = self.x - camera_offset[0]
+        adjusted_y = self.y - camera_offset[1]
+        
         # Calculate current radius with pulse effect
         current_radius = self.radius + self.pulse_amount
         
         # Draw glow effect
         glow_surf = pygame.Surface((int(self.glow_radius * 2), int(self.glow_radius * 2)), pygame.SRCALPHA)
         pygame.draw.circle(glow_surf, self.glow_color, (int(self.glow_radius), int(self.glow_radius)), int(self.glow_radius))
-        surface.blit(glow_surf, (self.x - self.glow_radius, self.y - self.glow_radius), special_flags=pygame.BLEND_ADD)
+        surface.blit(glow_surf, (adjusted_x - self.glow_radius, adjusted_y - self.glow_radius), special_flags=pygame.BLEND_ADD)
         
         # Draw main target
-        pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), int(current_radius))
+        pygame.draw.circle(surface, self.color, (int(adjusted_x), int(adjusted_y)), int(current_radius))
         
         # Draw inner circle
         inner_radius = current_radius * 0.7
-        pygame.draw.circle(surface, (255, 255, 255), (int(self.x), int(self.y)), int(inner_radius))
+        pygame.draw.circle(surface, (255, 255, 255), (int(adjusted_x), int(adjusted_y)), int(inner_radius))
         
         # Draw center dot
         center_radius = current_radius * 0.3
-        pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), int(center_radius))
+        pygame.draw.circle(surface, self.color, (int(adjusted_x), int(adjusted_y)), int(center_radius))
         
         # Add pulsing outline for required targets
         if self.required and not self.hit:
@@ -52,7 +56,7 @@ class Target:
             pygame.draw.circle(
                 surface,
                 (255, 255, 100),
-                (int(self.x), int(self.y)),
+                (int(adjusted_x), int(adjusted_y)),
                 int(outline_radius),
                 2
             )
@@ -79,6 +83,31 @@ class Target:
         
         if collision:
             self.hit = True
+            
+            # Add immediate visual feedback
+            if hasattr(ball, 'game') and hasattr(ball.game, 'particle_system'):
+                # Create explosion effect using the target's color
+                ball.game.particle_system.add_explosion(
+                    self.x, self.y,
+                    self.color,
+                    count=20,
+                    speed=100,
+                    size_range=(2, 6),
+                    lifetime_range=(0.5, 1.0),
+                    glow=True
+                )
+                
+                # Add small screen shake
+                ball.game.particle_system.screen_shake(0.2)
+                
+                # Create a flash effect
+                flash_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+                flash_surface.fill((255, 255, 255, 50))  # Semi-transparent white
+                
+            # Play sound
+            if hasattr(ball, 'game') and hasattr(ball.game, 'sound_manager'):
+                ball.game.sound_manager.play_sound("target_hit")
+            
             return True
         
         return False 

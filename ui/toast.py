@@ -1,96 +1,108 @@
 import pygame
-import time
-from utils.constants import WHITE
+from typing import Tuple, Optional
 
 class Toast:
     """A temporary notification message that appears and fades out."""
     
-    def __init__(self, message, duration=2.0, font=None, text_color=WHITE, 
-                 bg_color=(0, 0, 0, 180), padding=10, position="bottom"):
-        self.message = message
-        self.duration = duration
-        self.font = font or pygame.font.Font(None, 24)
-        self.text_color = text_color
-        self.bg_color = bg_color
-        self.padding = padding
-        self.position = position
-        self.start_time = time.time()
-        self.alpha = 255
-        self.elapsed = 0.0  # Track elapsed time directly
-        
-        # Pre-render text
-        self.text_surface = self.font.render(message, True, text_color)
-        self.width = self.text_surface.get_width() + padding * 2
-        self.height = self.text_surface.get_height() + padding * 2
-        
-        # Create background surface with alpha
-        self.bg_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        
-        # Set initial position (will be updated in draw)
-        self.x = 0
-        self.y = 0
-    
-    @property
-    def done(self):
-        """Property to check if the toast is done and should be removed."""
-        return self.should_remove()
-    
-    def update(self, dt=None):
-        """Update the toast state and alpha.
+    def __init__(self, message: str, duration: float = 3.0, color: Tuple[int, int, int] = (255, 255, 255), 
+                 bg_color: Optional[Tuple[int, int, int]] = None, font_size: int = 24):
+        """
+        Initialize a toast notification.
         
         Args:
-            dt: Delta time in seconds since the last update.
-               If None, uses system time difference.
+            message: Text to display
+            duration: How long to display the toast in seconds
+            color: Text color (RGB)
+            bg_color: Background color (RGB) or None for transparent black
+            font_size: Font size
         """
-        if dt is not None:
-            # Use provided delta time to update elapsed
-            self.elapsed += dt
-        else:
-            # Fallback to original time calculation
-            self.elapsed = time.time() - self.start_time
+        self.message = message
+        self.duration = duration
+        self.time_remaining = duration
+        self.color = color
+        self.bg_color = bg_color or (0, 0, 0, 200)  # Transparent black by default
+        self.font_size = font_size
+        self.font = pygame.font.Font(None, font_size)
+        self.alpha = 255  # Opacity for fade effects
         
-        # Fade in for the first 0.3 seconds
-        if self.elapsed < 0.3:
-            self.alpha = int(255 * (self.elapsed / 0.3))
-        # Maintain full opacity for the middle portion
-        elif self.elapsed < self.duration - 0.5:
-            self.alpha = 255
-        # Fade out for the last 0.5 seconds
-        else:
-            remaining = self.duration - self.elapsed
-            self.alpha = int(255 * (remaining / 0.5))
-            if self.alpha < 0:
-                self.alpha = 0
+        # Pre-render text to get dimensions
+        self._update_text_surface()
     
-    def draw(self, surface):
-        """Draw the toast on the given surface."""
-        # Update position based on surface size and position preference
-        if self.position == "bottom":
-            self.x = surface.get_width() // 2 - self.width // 2
-            self.y = surface.get_height() - self.height - 20
-        elif self.position == "top":
-            self.x = surface.get_width() // 2 - self.width // 2
-            self.y = 20
-        elif self.position == "center":
-            self.x = surface.get_width() // 2 - self.width // 2
-            self.y = surface.get_height() // 2 - self.height // 2
+    def _update_text_surface(self) -> None:
+        """Update the text surface with current message and color."""
+        self.text_surface = self.font.render(self.message, True, self.color)
+        self.text_rect = self.text_surface.get_rect()
         
-        # Clear the background surface
-        self.bg_surface.fill((0, 0, 0, 0))
-        
-        # Draw background with current alpha
-        bg_color_with_alpha = (*self.bg_color[:3], int(self.bg_color[3] * self.alpha / 255))
-        pygame.draw.rect(self.bg_surface, bg_color_with_alpha, (0, 0, self.width, self.height), border_radius=5)
-        
-        # Draw text with current alpha
-        text_color_with_alpha = (*self.text_color[:3], self.alpha)
-        text_surface = self.font.render(self.message, True, text_color_with_alpha)
-        text_rect = text_surface.get_rect(center=(self.width//2, self.height//2))
-        self.bg_surface.blit(text_surface, text_rect)
-        
-        # Draw the toast on the main surface
-        surface.blit(self.bg_surface, (self.x, self.y))
+        # Calculate padding and toast dimensions
+        self.padding = 10
+        self.width = self.text_rect.width + self.padding * 2
+        self.height = self.text_rect.height + self.padding * 2
     
-    def should_remove(self):
-        """Check if the toast should be removed."""
-        return self.elapsed > self.duration 
+    def update(self, dt: float) -> None:
+        """
+        Update the toast notification.
+        
+        Args:
+            dt: Delta time in seconds
+        """
+        self.time_remaining -= dt
+        
+        # Fade out during the last 0.5 seconds
+        if self.time_remaining < 0.5:
+            self.alpha = int(255 * (self.time_remaining / 0.5))
+            self.alpha = max(0, min(255, self.alpha))
+    
+    def draw(self, surface: pygame.Surface, position: Tuple[int, int]) -> None:
+        """
+        Draw the toast notification to the surface.
+        
+        Args:
+            surface: Surface to draw on
+            position: (x, y) position to draw at (top-left corner)
+        """
+        # Create a surface for the toast
+        toast_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        
+        # Draw background
+        if len(self.bg_color) == 4:
+            # RGBA background
+            pygame.draw.rect(toast_surface, self.bg_color, 
+                            (0, 0, self.width, self.height), border_radius=5)
+        else:
+            # RGB background with set alpha
+            pygame.draw.rect(toast_surface, (*self.bg_color, self.alpha), 
+                            (0, 0, self.width, self.height), border_radius=5)
+        
+        # Draw text with alpha
+        text_alpha_surface = pygame.Surface(self.text_rect.size, pygame.SRCALPHA)
+        text_alpha_surface.fill((255, 255, 255, self.alpha))
+        
+        # Create a copy of the text surface with current alpha
+        text_surface_with_alpha = self.text_surface.copy()
+        text_surface_with_alpha.blit(text_alpha_surface, (0, 0), 
+                                    special_flags=pygame.BLEND_RGBA_MULT)
+        
+        # Blit text to toast
+        toast_surface.blit(text_surface_with_alpha, 
+                          (self.padding, self.padding))
+        
+        # Blit toast to surface
+        surface.blit(toast_surface, position)
+    
+    def should_remove(self) -> bool:
+        """
+        Check if the toast should be removed.
+        
+        Returns:
+            True if the toast's time is up, False otherwise
+        """
+        return self.time_remaining <= 0
+    
+    def get_dimensions(self) -> Tuple[int, int]:
+        """
+        Get the toast dimensions.
+        
+        Returns:
+            (width, height) of the toast
+        """
+        return (self.width, self.height) 

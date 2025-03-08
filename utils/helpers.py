@@ -19,6 +19,10 @@ def lerp(a, b, t):
     """Linear interpolation between a and b by t (0.0 to 1.0)."""
     return a + (b - a) * t
 
+def map_range(value, from_min, from_max, to_min, to_max):
+    """Maps a value from one range to another."""
+    return (value - from_min) * (to_max - to_min) / (from_max - from_min) + to_min
+
 def circle_rect_collision(circle_x, circle_y, circle_radius, rect_x, rect_y, rect_width, rect_height):
     """
     Check collision between a circle and a rectangle.

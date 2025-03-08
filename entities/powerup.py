@@ -46,59 +46,61 @@ class PowerUp:
         if self.rotation >= 360:
             self.rotation -= 360
     
-    def draw(self, surface):
-        """Draw the power-up on the given surface."""
-        if self.collected:
-            return
-            
-        # Calculate current radius with pulse effect
-        current_radius = self.radius + self.pulse_amount
+    def draw(self, surface, camera_offset=(0, 0)):
+        """Draw the powerup on the surface."""
+        # Calculate adjusted position
+        adjusted_x = self.x - camera_offset[0]
+        adjusted_y = self.y - camera_offset[1]
         
-        # Draw glow effect
-        glow_surf = pygame.Surface((int(self.glow_radius * 2), int(self.glow_radius * 2)), pygame.SRCALPHA)
-        pygame.draw.circle(glow_surf, self.glow_color, (int(self.glow_radius), int(self.glow_radius)), int(self.glow_radius))
-        surface.blit(glow_surf, (self.x - self.glow_radius, self.y - self.glow_radius), special_flags=pygame.BLEND_ADD)
+        # Draw pulsing outer glow
+        glow_radius = self.radius * (1.0 + 0.2 * math.sin(self.pulse_timer * 5))
+        glow_surf = pygame.Surface((int(glow_radius * 3), int(glow_radius * 3)), pygame.SRCALPHA)
+        pygame.draw.circle(glow_surf, (*self.color[:3], 100), (int(glow_radius * 1.5), int(glow_radius * 1.5)), int(glow_radius * 1.2))
+        surface.blit(glow_surf, (adjusted_x - glow_radius * 1.5, adjusted_y - glow_radius * 1.5), special_flags=pygame.BLEND_ADD)
         
         # Draw main circle
-        pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), int(current_radius))
+        pygame.draw.circle(surface, self.color, (int(adjusted_x), int(adjusted_y)), int(self.radius))
         
-        # Draw a symbol based on the power-up type
+        # Draw icon or symbol based on powerup type
         if self.type == "energy":
-            # Draw a lightning bolt
+            # Draw a lightning bolt or battery icon
+            icon_size = self.radius * 0.8
+            # Simple lightning bolt - adjust as needed
             points = [
-                (self.x - current_radius * 0.3, self.y - current_radius * 0.5),
-                (self.x + current_radius * 0.1, self.y - current_radius * 0.1),
-                (self.x - current_radius * 0.1, self.y + current_radius * 0.1),
-                (self.x + current_radius * 0.3, self.y + current_radius * 0.5)
+                (adjusted_x - icon_size * 0.3, adjusted_y - icon_size * 0.5),
+                (adjusted_x + icon_size * 0.1, adjusted_y - icon_size * 0.1),
+                (adjusted_x - icon_size * 0.1, adjusted_y + 0),
+                (adjusted_x + icon_size * 0.3, adjusted_y + icon_size * 0.5),
+                (adjusted_x + 0, adjusted_y + 0),
+                (adjusted_x + icon_size * 0.2, adjusted_y - icon_size * 0.2)
             ]
-            pygame.draw.lines(surface, (255, 255, 255), False, points, 2)
+            pygame.draw.polygon(surface, (255, 255, 0), points)
             
         elif self.type == "speed":
-            # Draw a fast-forward symbol
-            pygame.draw.polygon(surface, (255, 255, 255), [
-                (self.x - current_radius * 0.4, self.y - current_radius * 0.3),
-                (self.x - current_radius * 0.1, self.y),
-                (self.x - current_radius * 0.4, self.y + current_radius * 0.3)
-            ])
-            pygame.draw.polygon(surface, (255, 255, 255), [
-                (self.x, self.y - current_radius * 0.3),
-                (self.x + current_radius * 0.3, self.y),
-                (self.x, self.y + current_radius * 0.3)
-            ])
+            # Draw speed arrows
+            arrow_size = self.radius * 0.6
+            arrow_width = arrow_size * 0.3
+            for offset in [-arrow_size * 0.7, 0, arrow_size * 0.7]:
+                points = [
+                    (adjusted_x - arrow_size + offset, adjusted_y),
+                    (adjusted_x - arrow_size * 0.5 + offset, adjusted_y - arrow_width),
+                    (adjusted_x - arrow_size * 0.5 + offset, adjusted_y + arrow_width)
+                ]
+                pygame.draw.polygon(surface, (255, 255, 255), points)
             
         elif self.type == "size":
             # Draw a resize symbol
-            pygame.draw.circle(surface, (255, 255, 255), (int(self.x), int(self.y)), int(current_radius * 0.5), 2)
+            pygame.draw.circle(surface, (255, 255, 255), (int(adjusted_x), int(adjusted_y)), int(self.radius * 0.5), 2)
             
         elif self.type == "time":
             # Draw a clock symbol
-            pygame.draw.circle(surface, (255, 255, 255), (int(self.x), int(self.y)), int(current_radius * 0.6), 1)
+            pygame.draw.circle(surface, (255, 255, 255), (int(adjusted_x), int(adjusted_y)), int(self.radius * 0.6), 1)
             # Draw clock hands
             angle = math.radians(self.rotation)
-            hand_length = current_radius * 0.5
-            end_x = self.x + math.cos(angle) * hand_length
-            end_y = self.y + math.sin(angle) * hand_length
-            pygame.draw.line(surface, (255, 255, 255), (self.x, self.y), (end_x, end_y), 2)
+            hand_length = self.radius * 0.5
+            end_x = adjusted_x + math.cos(angle) * hand_length
+            end_y = adjusted_y + math.sin(angle) * hand_length
+            pygame.draw.line(surface, (255, 255, 255), (adjusted_x, adjusted_y), (end_x, end_y), 2)
     
     def check_collision(self, ball):
         """

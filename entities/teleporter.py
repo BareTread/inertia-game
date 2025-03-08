@@ -85,8 +85,12 @@ class Teleporter:
         
         self.portal_particles = updated_particles
     
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, camera_offset=(0, 0)) -> None:
         """Draw the teleporter on the surface."""
+        # Calculate adjusted position
+        adjusted_x = self.x - camera_offset[0]
+        adjusted_y = self.y - camera_offset[1]
+        
         # Draw outer glow
         glow_radius = self.outer_radius + math.sin(self.time * 2) * 3
         glow_alpha = 100 + int(50 * math.sin(self.time * 3))
@@ -96,23 +100,28 @@ class Teleporter:
         glow_size = int(glow_radius * 2)
         glow_surface = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
         pygame.draw.circle(glow_surface, glow_color, (glow_size//2, glow_size//2), glow_radius)
-        surface.blit(glow_surface, (self.x - glow_size//2, self.y - glow_size//2))
+        surface.blit(glow_surface, (adjusted_x - glow_size//2, adjusted_y - glow_size//2))
         
         # Draw outer ring
-        pygame.draw.circle(surface, self.color, (self.x, self.y), self.radius)
+        pygame.draw.circle(surface, self.color, (adjusted_x, adjusted_y), self.radius)
         
         # Draw inner portal
         inner_radius = self.inner_radius + math.sin(self.time * 4) * 2
-        pygame.draw.circle(surface, BLACK, (self.x, self.y), inner_radius)
+        pygame.draw.circle(surface, BLACK, (adjusted_x, adjusted_y), inner_radius)
         
         # Draw portal particles
         for p_x, p_y, _, _, p_life in self.portal_particles:
             # Particle size and opacity based on remaining life
-            particle_radius = 3 * p_life
-            alpha = int(200 * p_life)
-            particle_color = (*self.secondary_color[:3], alpha)
+            p_size = int(3 * p_life)
+            p_alpha = int(255 * p_life)
+            p_color = (*self.secondary_color[:3], p_alpha)
             
-            pygame.draw.circle(surface, particle_color, (int(p_x), int(p_y)), int(particle_radius))
+            # Adjust particle positions
+            adjusted_p_x = p_x - camera_offset[0]
+            adjusted_p_y = p_y - camera_offset[1]
+            
+            # Draw the particle
+            pygame.draw.circle(surface, p_color, (int(adjusted_p_x), int(adjusted_p_y)), p_size)
         
         # Draw activation effect
         if self.active:
@@ -122,21 +131,21 @@ class Teleporter:
             ring_alpha = int(255 * (1 - self.active_time / 0.5))
             ring_color = (*WHITE[:3], ring_alpha)
             
-            pygame.draw.circle(surface, ring_color, (self.x, self.y), ring_radius, int(ring_width))
+            pygame.draw.circle(surface, ring_color, (adjusted_x, adjusted_y), ring_radius, int(ring_width))
         
         # Draw cooldown indicator if on cooldown
         if self.cooldown_timer > 0:
             # Draw a clock-like indicator showing cooldown progress
             angle = (1 - self.cooldown_timer / self.cooldown) * math.pi * 2
             pygame.draw.arc(surface, WHITE, 
-                           (self.x - self.radius - 5, self.y - self.radius - 5, 
+                           (adjusted_x - self.radius - 5, adjusted_y - self.radius - 5, 
                             self.radius * 2 + 10, self.radius * 2 + 10), 
                            -math.pi/2, angle - math.pi/2, 3)
         
         # Draw pair ID
         font = pygame.font.Font(None, 24)
         id_text = font.render(str(self.pair_id), True, WHITE)
-        id_rect = id_text.get_rect(center=(self.x, self.y))
+        id_rect = id_text.get_rect(center=(adjusted_x, adjusted_y))
         surface.blit(id_text, id_rect)
     
     def check_collision(self, ball) -> bool:
@@ -172,4 +181,12 @@ class Teleporter:
             ball.vel_y *= velocity_bonus
             
             # Activate target teleporter
-            self.target_teleporter.activate() 
+            self.target_teleporter.activate()
+    
+    def get_position(self):
+        """Return the current position of the teleporter."""
+        return (self.x, self.y)
+    
+    def set_position(self, position):
+        """Set the position of the teleporter."""
+        self.x, self.y = position 

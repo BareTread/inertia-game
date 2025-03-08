@@ -16,7 +16,10 @@ class Slider:
         self.max_value = max_value
         self.value = initial_value
         self.label = label
-        self.font = font or pygame.font.Font(None, 24)
+        if font is None:
+            self.font = pygame.font.Font(None, 24)
+        else:
+            self.font = font
         self.text_color = text_color
         self.bg_color = bg_color
         self.handle_color = handle_color

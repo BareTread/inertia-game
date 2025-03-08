@@ -1,0 +1,112 @@
+{
+    "demo": {
+        "name": "Enhanced Demo",
+        "description": "Showcase of enhanced entities",
+        "ball": {
+            "x": 200, 
+            "y": 200
+        },
+        "walls": [
+            {
+                "x": 100,
+                "y": 100,
+                "width": 20,
+                "height": 500
+            },
+            {
+                "x": 100,
+                "y": 100,
+                "width": 1000,
+                "height": 20
+            },
+            {
+                "x": 100,
+                "y": 600,
+                "width": 1000,
+                "height": 20
+            },
+            {
+                "x": 1100,
+                "y": 100,
+                "width": 20,
+                "height": 520
+            },
+            {
+                "x": 400,
+                "y": 300,
+                "width": 200,
+                "height": 20
+            },
+            {
+                "x": 700,
+                "y": 400,
+                "width": 20,
+                "height": 100
+            }
+        ],
+        "targets": [
+            {
+                "x": 300,
+                "y": 400,
+                "radius": 20,
+                "points": 100,
+                "required": true
+            },
+            {
+                "x": 500,
+                "y": 500,
+                "radius": 20,
+                "points": 200,
+                "required": true
+            },
+            {
+                "x": 900,
+                "y": 300,
+                "radius": 20,
+                "points": 500,
+                "required": true
+            }
+        ],
+        "powerups": [
+            {
+                "x": 350,
+                "y": 200,
+                "type": "energy"
+            },
+            {
+                "x": 600,
+                "y": 350,
+                "type": "speed"
+            },
+            {
+                "x": 800,
+                "y": 500,
+                "type": "time"
+            },
+            {
+                "x": 900,
+                "y": 200,
+                "type": "gravity"
+            }
+        ],
+        "surfaces": [
+            {
+                "x": 120,
+                "y": 120,
+                "width": 980,
+                "height": 480,
+                "friction": 0.99,
+                "color": [30, 30, 50]
+            }
+        ],
+        "gravity_wells": [
+            {
+                "x": 600,
+                "y": 200,
+                "radius": 100,
+                "strength": 0.5,
+                "repel": false
+            }
+        ]
+    }
+} 
