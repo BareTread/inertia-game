@@ -1,146 +1,139 @@
 import pygame
 import math
-from utils.constants import BLACK, WALL_BORDER_COLOR, WALL_BORDER_WIDTH
+from utils.constants import BLACK, WHITE
 
 class Wall:
-    """Wall object that blocks the ball."""
-    
-    def __init__(self, x, y, width, height, color=BLACK):
+    def __init__(self, x, y, width, height):
         self.rect = pygame.Rect(x, y, width, height)
-        self.color = color
         self.impact_timer = 0
-        self.impact_duration = 0.2  # How long impact effect lasts
-        self.impact_color = None    # Will be set during collision
+        self.impact_duration = 0.3
+        self.impact_color = None
+        
+    def get_position(self):
+        """Return the current position of the wall."""
+        return (self.rect.x, self.rect.y)
     
+    def set_position(self, position):
+        """Set the position of the wall."""
+        self.rect.x, self.rect.y = position
+        
     def update(self, dt):
-        """Update wall state, like impact visual effects."""
+        """Update wall state"""
         if self.impact_timer > 0:
             self.impact_timer -= dt
-    
+            
     def draw(self, surface, camera_offset=(0, 0)):
-        """Draw the wall with a visible border."""
-        # Draw the main wall
+        """Draw the wall with impact effect"""
+        # Calculate adjusted position with camera offset
         adjusted_x = self.rect.left - camera_offset[0]
         adjusted_y = self.rect.top - camera_offset[1]
         
-        # Use a more visible color for the wall
-        fill_color = (50, 50, 120)  # Darker blue for the wall fill
+        # Draw normal wall with a bright, highly visible color
+        wall_color = (20, 40, 220)  # Bright blue color for high visibility
+        pygame.draw.rect(surface, wall_color, 
+                        (adjusted_x, adjusted_y, self.rect.width, self.rect.height))
         
-        # Draw the wall itself with a more visible color
-        pygame.draw.rect(
-            surface, 
-            fill_color,
-            (adjusted_x, adjusted_y, self.rect.width, self.rect.height)
-        )
+        # Add border with contrasting color for better visibility
+        pygame.draw.rect(surface, (255, 255, 0), 
+                        (adjusted_x, adjusted_y, self.rect.width, self.rect.height), 2)
         
-        # Draw a border around the wall with increased width for better visibility
-        pygame.draw.rect(
-            surface, 
-            WALL_BORDER_COLOR,
-            (adjusted_x, adjusted_y, self.rect.width, self.rect.height),
-            WALL_BORDER_WIDTH + 1  # Increase border width
-        )
-        
-        # Add highlight effect to make it more visible
-        highlight_color = (120, 120, 255, 100)  # Light blue with some transparency
+        # Draw impact highlight if active
         if self.impact_timer > 0:
-            # Use impact color if wall was recently hit
-            pygame.draw.rect(
-                surface,
-                self.impact_color,
-                (adjusted_x, adjusted_y, self.rect.width, self.rect.height),
-                1
-            )
-    
+            # Calculate alpha based on remaining time
+            alpha = int(255 * (self.impact_timer / self.impact_duration))
+            
+            # Draw a highlight rectangle
+            highlight_rect = pygame.Rect(adjusted_x - 3, adjusted_y - 3, 
+                                        self.rect.width + 6, self.rect.height + 6)
+            
+            highlight_surface = pygame.Surface((highlight_rect.width, highlight_rect.height), pygame.SRCALPHA)
+            highlight_color = (*self.impact_color[:3], alpha)
+            pygame.draw.rect(highlight_surface, highlight_color, 
+                           (0, 0, highlight_rect.width, highlight_rect.height), 3)
+            
+            surface.blit(highlight_surface, highlight_rect.topleft)
+            
     def check_collision(self, ball):
-        """Check if the ball is colliding with this wall."""
-        # Find the closest point on the rect to the ball
+        """Check and handle ball collision with improved feedback"""
+        # Original collision detection logic
         closest_x = max(self.rect.left, min(ball.x, self.rect.right))
         closest_y = max(self.rect.top, min(ball.y, self.rect.bottom))
         
-        # Calculate distance from closest point to circle center
         distance_x = ball.x - closest_x
         distance_y = ball.y - closest_y
+        
         distance_squared = distance_x**2 + distance_y**2
         
-        # Check collision
-        return distance_squared < ball.radius**2
-    
-    def handle_collision(self, ball):
-        """
-        Handle collision with a ball.
-        Returns True if collision occurred, False otherwise.
-        """
-        # Find the closest point on the rect to the ball
-        closest_x = max(self.rect.left, min(ball.x, self.rect.right))
-        closest_y = max(self.rect.top, min(ball.y, self.rect.bottom))
-        
-        # Calculate distance from closest point to circle center
-        distance_x = ball.x - closest_x
-        distance_y = ball.y - closest_y
-        distance_squared = distance_x**2 + distance_y**2
-        
-        # Check collision
+        # If collision detected
         if distance_squared < ball.radius**2:
-            # Handle collision
-            overlap = ball.radius - math.sqrt(distance_squared)
+            # Calculate collision normal and penetration
+            distance = math.sqrt(distance_squared)
             
-            # Normalize direction
-            if distance_squared > 0:
-                norm_x = distance_x / math.sqrt(distance_squared)
-                norm_y = distance_y / math.sqrt(distance_squared)
+            # Avoid division by zero
+            if distance < 0.001:
+                # Handle rare case of distance being almost zero
+                normal_x, normal_y = 0, -1  # Default normal
+                penetration = ball.radius
             else:
-                # Ball is exactly at the closest point, push in arbitrary direction
-                norm_x, norm_y = 1, 0
+                normal_x = distance_x / distance
+                normal_y = distance_y / distance
+                penetration = ball.radius - distance
+            
+            # Position correction to prevent sticking
+            correction_factor = penetration * 1.01  # Slight extra push to prevent sticking
+            ball.x += normal_x * correction_factor
+            ball.y += normal_y * correction_factor
+            
+            # Reflect velocity with energy loss
+            dot_product = ball.vel_x * normal_x + ball.vel_y * normal_y
+            
+            # Only reflect if moving into the wall
+            if dot_product < 0:
+                restitution = 0.85  # Energy retention; 1.0 = perfect bounce
                 
-            # Move ball out of collision
-            ball.x += norm_x * overlap
-            ball.y += norm_y * overlap
-            
-            # Bounce (with some energy loss)
-            dot_product = ball.vel_x * norm_x + ball.vel_y * norm_y
-            
-            # Improve bounce feel with better energy conservation
-            bounce_factor = 1.5  # Decrease from 1.8 for more controlled bounces
-            energy_preservation = 0.85 + (ball.get_speed() * 0.01)  # Speed-based energy preservation
-            
-            ball.vel_x -= bounce_factor * dot_product * norm_x * energy_preservation
-            ball.vel_y -= bounce_factor * dot_product * norm_y * energy_preservation
-            
-            # Add visual and audio feedback
-            collision_speed = ball.get_speed()
-            if collision_speed > 2.0:
-                # Set impact effect
+                # Calculate reflection velocity
+                ball.vel_x -= (1 + restitution) * dot_product * normal_x
+                ball.vel_y -= (1 + restitution) * dot_product * normal_y
+                
+                # Apply impact visual feedback
                 self.impact_timer = self.impact_duration
                 
-                # Make impact color based on collision speed
-                intensity = min(255, int(collision_speed * 20))
-                self.impact_color = (intensity, intensity, 255)
+                # Color based on impact force
+                impact_force = -dot_product
+                if impact_force > 10:
+                    self.impact_color = (255, 50, 50)  # Strong impact (red)
+                elif impact_force > 5:
+                    self.impact_color = (255, 255, 50)  # Medium impact (yellow)
+                else:
+                    self.impact_color = (50, 255, 50)  # Light impact (green)
                 
-                # Create impact particles
-                if hasattr(ball, 'game') and hasattr(ball.game, 'particle_system'):
-                    num_particles = min(10, int(collision_speed))
-                    collision_point = [
-                        ball.x + ball.radius * norm_x,
-                        ball.y + ball.radius * norm_y
-                    ]
+                # Create particles if game and ball have particle systems
+                if hasattr(ball, 'game') and ball.game and hasattr(ball.game, 'particle_system'):
+                    impact_point = (closest_x, closest_y)
                     
-                    ball.game.particle_system.create_impact(
-                        collision_point[0], collision_point[1],
-                        num_particles=num_particles,
-                        color=self.color,
-                        velocity=[-ball.vel_x * 0.2, -ball.vel_y * 0.2]
+                    # Determine color based on impact force
+                    particle_color = (255, 255, 255)
+                    if impact_force > 12:
+                        particle_color = (255, 100, 100)  # Red for hard impacts
+                    elif impact_force > 6:
+                        particle_color = (255, 255, 100)  # Yellow for medium impacts
+                    
+                    # Spawn more particles for harder impacts
+                    particle_count = min(int(impact_force), 15)
+                    
+                    # Create impact particles
+                    ball.game.particle_system.create_particles(
+                        impact_point[0], impact_point[1], 
+                        particle_count,
+                        particle_color,
+                        min_speed=impact_force * 0.5,
+                        max_speed=impact_force * 1.5,
+                        min_lifetime=0.2,
+                        max_lifetime=0.5,
+                        direction=(-normal_x, -normal_y),  # Reverse of normal
+                        spread=0.7  # 0.7 radians spread
                     )
-                    
-                    # Add screen shake based on impact force
-                    shake_amount = min(0.5, collision_speed * 0.05)
-                    ball.game.particle_system.screen_shake(shake_amount)
-                    
-                    # Play sound with volume based on impact
-                    if hasattr(ball.game, 'sound_manager'):
-                        volume = min(1.0, collision_speed / 10.0)
-                        ball.game.sound_manager.play_sound("wall_hit", volume)
-            
+                
             return True
         
         return False 

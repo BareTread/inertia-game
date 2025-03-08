@@ -504,3 +504,41 @@ class ParticleSystem:
                 gravity=100,
                 fade_mode="smooth"
             ) 
+    
+    def create_particles(self, x, y, count, color, min_speed=50, max_speed=150, min_lifetime=0.3, max_lifetime=1.0, direction=None, spread=2*math.pi):
+        """Create a burst of particles at the given position.
+        
+        Args:
+            x, y: Position to create particles
+            count: Number of particles to create
+            color: Color of particles
+            min_speed, max_speed: Speed range for particles
+            min_lifetime, max_lifetime: Lifetime range for particles
+            direction: Optional direction vector (normalized). If None, particles go in all directions
+            spread: Angle spread in radians (only used if direction is provided)
+        """
+        for _ in range(count):
+            # Calculate random velocity
+            if direction is None:
+                # Random direction if no specific direction given
+                angle = random.uniform(0, 2 * math.pi)
+                speed = random.uniform(min_speed, max_speed)
+                vel_x = math.cos(angle) * speed
+                vel_y = math.sin(angle) * speed
+            else:
+                # Use provided direction with spread
+                base_angle = math.atan2(direction[1], direction[0])
+                angle = base_angle + random.uniform(-spread/2, spread/2)
+                speed = random.uniform(min_speed, max_speed)
+                vel_x = math.cos(angle) * speed
+                vel_y = math.sin(angle) * speed
+            
+            # Random size and lifetime
+            size = random.uniform(2, 5)
+            lifetime = random.uniform(min_lifetime, max_lifetime)
+            
+            # Create particle
+            self.add_particle(
+                x, y, vel_x, vel_y, color, size, lifetime,
+                gravity=0, fade_mode="smooth", glow=True
+            ) 

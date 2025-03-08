@@ -7,8 +7,9 @@ from ui.toast import Toast
 from utils.constants import WIDTH, HEIGHT, WHITE, BLACK, BLUE, GREEN, RED, YELLOW
 
 class UIManager:
-    def __init__(self, game):
-        self.game = game
+    def __init__(self):
+        """Initialize the UI manager without game reference."""
+        self.game = None  # Will be set later via set_game
         self.ui_elements = []
         self.fonts = {}
         self.toasts = []
@@ -16,6 +17,10 @@ class UIManager:
         
         # Initialize fonts
         self._initialize_fonts()
+    
+    def set_game(self, game):
+        """Set the game reference after initialization."""
+        self.game = game
     
     def _initialize_fonts(self):
         """Initialize fonts used in the UI."""
@@ -390,4 +395,14 @@ class UIManager:
         # Set up the level entities
         self.game.level_manager.setup_level(level)
         # Change game state to start the game
-        self.game.state_manager.change_state(GameState.GAME) 
+        self.game.state_manager.change_state(GameState.GAME)
+    
+    def handle_event(self, event):
+        """Handle UI events and return True if the event was handled by UI."""
+        # Process events for UI elements
+        for element in self.ui_elements:
+            if hasattr(element, 'handle_event'):
+                if element.handle_event(event):
+                    return True
+        
+        return False 

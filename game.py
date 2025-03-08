@@ -23,16 +23,12 @@ from utils.floating_text import FloatingText  # Import floating text
 from utils.camera import Camera
 from utils.screen_shake import ScreenShake
 
-# Import entities
+# Import entities - use consolidated entities only
 from entities.ball import Ball
-from entities.enhanced_ball import EnhancedBall  # Import enhanced ball
 from entities.wall import Wall
-from entities.enhanced_wall import EnhancedWall  # Import enhanced wall
 from entities.target import Target
-from entities.enhanced_target import EnhancedTarget  # Import enhanced target
 from entities.surface import Surface
 from entities.powerup import PowerUp
-from entities.enhanced_powerup import EnhancedPowerUp  # Import enhanced powerup
 from entities.gravity_well import GravityWell
 from entities.bounce_pad import BouncePad
 from entities.teleporter import Teleporter
@@ -78,41 +74,59 @@ class Game:
         self.fps_timer = 0
         self.current_fps = 0
         
-        # Game state
-        self.state_manager = StateManager(GameState.MAIN_MENU)
-        self.previous_state = None
-        
-        # Game objects
-        self.ball = None
-        self.entities = []
-        
         # Load settings
         self.settings = self._load_settings()
         
         # Create enhanced particle system
         self.particle_system = ParticleSystem()
         
-        # Level data
-        self.level_manager = LevelManager(self)
+        # Power-up effects
+        self.energy = 100
+        self.max_energy = 100
+        self.time_slow_factor = 1.0
+        self.gravity_field_active = False
+        self.magnetic_attraction = False
+        
+        # Create managers without passing self
+        self.state_manager = StateManager(GameState.MAIN_MENU)
+        self.level_manager = LevelManager()
+        self.collision_manager = CollisionManager()
+        self.ui_manager = UIManager()
+        
+        # Set game reference in each manager
+        self.state_manager.set_game(self)
+        self.level_manager.set_game(self)
+        self.collision_manager.set_game(self)
+        self.ui_manager.set_game(self)
+        
+        # Game objects - these should come from level_manager now
+        self.ball = None  # Will be set by level_manager
+        self.entities = []  # Will be managed by level_manager
+        
+        # Initialize level properties
         self.level_start_time = 0
         self.level_playable = False  # Flag to indicate if level can be completed
         self.level_playable_delay = 3.0  # Seconds before level can be completed
         self.level_complete = False
         
-        # Collision manager
-        self.collision_manager = CollisionManager(self)
-        
-        # UI elements
-        self.ui_manager = UIManager(self)
-        
         # Camera system for larger playing field
-        self.camera_offset = [0, 0]
-        self.world_width = WIDTH * 2  # Playing field wider than screen
-        self.world_height = HEIGHT * 2  # Playing field taller than screen
+        self.camera = Camera(WIDTH, HEIGHT)
+        
+        # World dimensions
+        self.world_width = WIDTH * 3  # Larger world than screen
+        self.world_height = HEIGHT * 3  # Larger world than screen
+        
+        # Aiming properties
+        self.aiming = False
+        self.aim_start_pos = None
+        self.aim_current_pos = None
+        self.aim_end_pos = None
+        
+        # Debug flags
+        self.show_debug = False
         
         # Screen shake effect
         self.screen_shake_amount = 0
-        self.screen_shake = 0  # Added for backward compatibility
         
         # Force application
         self.applying_force = False
@@ -120,18 +134,13 @@ class Game:
         self.force_magnitude = 0
         
         # Energy system
-        self.energy = ENERGY_MAX  # Full energy
         self.energy_regen_rate = ENERGY_REGEN  # Energy regeneration per second
-        self.max_energy = ENERGY_MAX
         
         # Floating text system
         self.floating_texts = []
         
         # Power-up tracking
         self.active_power_ups = []
-        
-        # Time factor for slow-motion effect
-        self.time_slow_factor = 1.0
         
         # Time limit for level
         self.time_limit = 60.0  # Default time limit in seconds
@@ -210,7 +219,7 @@ class Game:
         self.entities = []
         
         # Reset camera
-        self.camera_offset = [0, 0]
+        self.camera.reset()
         
         # Store current level
         self.level_manager.current_level = level_num
@@ -362,14 +371,20 @@ class Game:
         self.ui_manager.setup_for_state(GameState.LEVEL_COMPLETE)
     
     def _start_level(self, level_num):
-        """Start a level."""
-        # Reset level state
-        self.level_complete = False
-        self.level_playable = False  # Reset level playable flag
-        self.level_start_time = pygame.time.get_ticks()
+        """Start a new level."""
+        # Reset camera
+        self.camera.set_target_position((0, 0))
+        
+        # Store current level
+        self.current_level = level_num
         
         # Set up the level
         self.level_manager.setup_level(level_num)
+        
+        # Set level start time
+        self.level_start_time = time.time()
+        self.level_playable = False  # Will be set to True after delay
+        self.level_complete = False
         
         # Change state to game
         self.state_manager.change_state(GameState.GAME)
@@ -580,23 +595,19 @@ class Game:
         return True
     
     def _update_camera(self):
-        if not self.level_manager.ball:
+        if not self.level_manager.get_ball():
             return
-
+ 
         # Get the ball's position
-        ball_x, ball_y = self.level_manager.ball.get_position()
+        ball_x, ball_y = self.level_manager.get_ball().get_position()
         
         # Calculate target camera position
         target_x = max(0, ball_x - WIDTH // 2)
         target_y = max(0, ball_y - HEIGHT // 2)
         
         # Smoothly move camera towards target position
-        self.camera_offset[0] += (target_x - self.camera_offset[0]) * 0.1
-        self.camera_offset[1] += (target_y - self.camera_offset[1]) * 0.1
-        
-        # Ensure camera doesn't go below zero
-        self.camera_offset[0] = max(0, self.camera_offset[0])
-        self.camera_offset[1] = max(0, self.camera_offset[1])
+        self.camera.set_target_position((target_x, target_y))
+        self.camera.update(self.dt)
     
     def _reset_power_up_effects(self):
         """Reset all power-up effects to default values."""
@@ -606,14 +617,10 @@ class Game:
         self.time_slow_factor = 1.0
         self.gravity_field_active = False
 
-    def update(self, dt=None):
-        """Update game logic based on the current state."""
-        # Calculate delta time if not provided
-        if dt is None:
-            dt = self.dt
-        
-        # Apply time slow factor
-        effective_dt = dt * self.time_slow_factor
+    def update(self, dt):
+        """Update game state and objects."""
+        # Update the game clock
+        self.dt = dt
         
         # Update FPS counter
         self.fps_counter += 1
@@ -622,48 +629,40 @@ class Game:
             self.current_fps = self.fps_counter
             self.fps_counter = 0
             self.fps_timer = 0
-
-        # Update based on current state
+            
+        # Update particle system
+        if self.particle_system:
+            self.particle_system.update(dt)
+        
+        # Update game depending on state
         current_state = self.state_manager.current_state
         
-        # Always update particle system
-        if self.particle_system:
-            self.particle_system.update(effective_dt)
-        
-        # Update screen shake
-        if self.screen_shake_amount > 0:
-            self.screen_shake_amount *= 0.9  # Decay
-            if self.screen_shake_amount < 0.1:
-                self.screen_shake_amount = 0
-        
-        # Update UI manager
-        self.ui_manager.update(effective_dt)
-        
-        # Update game state
         if current_state == GameState.GAME:
-            # Energy regeneration
-            self.energy = min(self.max_energy, self.energy + 1.0 * dt)
+            # Update ball
+            if self.level_manager.get_ball():
+                self.level_manager.get_ball().update(dt)
             
-            # Check if enough time has passed to allow level completion
-            time_since_level_start = (pygame.time.get_ticks() - self.level_start_time) / 1000
+            # Update entities
+            for entity in self.level_manager.get_entities():
+                if hasattr(entity, 'update'):
+                    entity.update(dt)
             
-            # Make level playable after the delay
-            if not self.level_playable and time_since_level_start > self.level_playable_delay:
+            # Check collisions
+            if self.level_manager.get_ball():
+                collision_result = self.collision_manager.check_collisions(
+                    self.level_manager.get_ball(), 
+                    self.level_manager.get_entities()
+                )
+                
+                # Check if level is complete
+                if collision_result.get('level_complete', False) and self.level_playable:
+                    self.level_complete = True
+                    self.state_manager.change_state(GameState.LEVEL_COMPLETE)
+            
+            # Update level playable flag
+            current_time = time.time()
+            if not self.level_playable and current_time - self.level_start_time > self.level_playable_delay:
                 self.level_playable = True
-                print(f"Level is now playable after {time_since_level_start:.2f} seconds")
-                # Show a toast notification that the level is now playable
-                self.ui_manager.add_toast("Level Ready! Hit the targets to complete the level.", 2.0, (0, 255, 0))
-            
-            # Update ball physics
-            if self.level_manager.ball:
-                self.level_manager.ball.update(effective_dt)
-            
-            # Check for collisions
-            self._check_collisions()
-            
-            # Check for level completion only if the level is playable
-            if self.level_playable and not self.level_complete:
-                self._check_level_complete()
             
             # Update camera position based on ball position
             self._update_camera()
@@ -701,71 +700,65 @@ class Game:
                 self.level_manager.ball.vel_y = 0
     
     def draw(self):
-        # Clear the screen
-        self.screen.fill(BLACK)
+        """Draw the game based on the current state."""
+        # Clear screen
+        self.screen.fill(BACKGROUND_COLOR)
         
-        # Calculate effective camera offset (including screen shake)
-        camera_offset = [
-            self.camera_offset[0] + random.uniform(-self.screen_shake_amount, self.screen_shake_amount),
-            self.camera_offset[1] + random.uniform(-self.screen_shake_amount, self.screen_shake_amount)
-        ]
-        
-        # Draw background
-        self._draw_background(camera_offset)
-        
-        # Draw entities based on game state
+        # Get current state
         current_state = self.state_manager.current_state
         
-        if current_state == GameState.MAIN_MENU:
-            self._draw_main_menu()
-            return  # Exit after drawing main menu
-        elif current_state == GameState.LEVEL_SELECT:
-            self._draw_level_select()
-            return  # Exit after drawing level select
-        elif current_state == GameState.SETTINGS:
-            self._draw_settings()
-            return  # Exit after drawing settings
+        # Draw grid background (for all states)
+        self._draw_grid()
+        
+        # Draw based on state
+        if current_state == GameState.GAME:
+            # Apply camera offset
+            camera_offset = self.camera.position
+                
+            # Draw world boundary
+            self._draw_world_boundary(camera_offset)
             
-        # For GAME, PAUSED, or LEVEL_COMPLETE states:
-        
-        # Draw all entities
-        for i, entity in enumerate(self.level_manager.level_entities):
-            if hasattr(entity, 'draw'):
-                entity.draw(self.screen, camera_offset)
-        
-        # Draw the ball if it exists
-        if self.level_manager.ball:
-            self.level_manager.ball.draw(self.screen, camera_offset)
-        
-        # Draw floating texts
-        for text in self.floating_texts[:]:
-            text.draw(self.screen, camera_offset)
-            if text.should_remove():
-                self.floating_texts.remove(text)
-        
-        # Draw HUD
-        self._draw_hud()
-        
-        # Draw pause overlay if paused
-        if current_state == GameState.PAUSED:
-            # Draw semi-transparent overlay
-            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 128))  # Semi-transparent black
-            self.screen.blit(overlay, (0, 0))
+            # Draw entities
+            for entity in self.level_manager.get_entities():
+                if hasattr(entity, 'draw'):
+                    entity.draw(self.screen, camera_offset)
             
-            # Draw "PAUSED" text
-            font = pygame.font.SysFont(None, 72)
-            text = font.render("PAUSED", True, WHITE)
-            self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 3))
+            # Draw ball
+            if self.level_manager.get_ball():
+                self.level_manager.get_ball().draw(self.screen, camera_offset)
             
-            # Draw UI elements
-            self.ui_manager.draw(self.screen)
-        
-        # Draw level complete overlay
+            # Draw particles
+            if self.particle_system:
+                self.particle_system.draw(self.screen)
+            
+            # Draw HUD
+            self._draw_hud()
+            
         elif current_state == GameState.LEVEL_COMPLETE:
-            # Draw semi-transparent overlay
+            # Draw the completed level in the background
+            
+            # Apply camera offset
+            camera_offset = self.camera.position
+            
+            # Draw world boundary
+            self._draw_world_boundary(camera_offset)
+            
+            # Draw entities
+            for entity in self.level_manager.get_entities():
+                if hasattr(entity, 'draw'):
+                    entity.draw(self.screen, camera_offset)
+            
+            # Draw ball
+            if self.level_manager.get_ball():
+                self.level_manager.get_ball().draw(self.screen, camera_offset)
+            
+            # Draw particles
+            if self.particle_system:
+                self.particle_system.draw(self.screen)
+                
+            # Draw overlay
             overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 128))  # Semi-transparent black
+            overlay.fill((0, 0, 0, 150))  # Semi-transparent black
             self.screen.blit(overlay, (0, 0))
             
             # Draw "LEVEL COMPLETE" text
@@ -869,43 +862,68 @@ class Game:
         self.ui_manager.draw(self.screen)
     
     def _draw_hud(self):
-        """Draw game HUD elements."""
-        # Draw energy bar
-        energy_width = 200
-        energy_height = 15
-        energy_x = 20
-        energy_y = 20
+        """Draw the heads-up display."""
+        # Draw level information
+        level_text = f"Level: {self.level_manager.current_level}"
+        level_surface = self.font.render(level_text, True, WHITE)
+        self.screen.blit(level_surface, (10, 10))
         
-        # Background
-        pygame.draw.rect(self.screen, (50, 50, 50), (energy_x, energy_y, energy_width, energy_height))
+        # Draw FPS if debug is enabled
+        if self.show_debug:
+            fps_text = f"FPS: {self.current_fps}"
+            fps_surface = self.small_font.render(fps_text, True, WHITE)
+            self.screen.blit(fps_surface, (10, 40))
+            
+            # Draw additional debug info
+            ball = self.level_manager.get_ball()
+            if ball:
+                velocity = math.sqrt(ball.vel_x**2 + ball.vel_y**2)
+                debug_text = f"Ball Velocity: {velocity:.2f}"
+                debug_surface = self.small_font.render(debug_text, True, WHITE)
+                self.screen.blit(debug_surface, (10, 60))
+                
+                pos_text = f"Ball Position: ({ball.x:.1f}, {ball.y:.1f})"
+                pos_surface = self.small_font.render(pos_text, True, WHITE)
+                self.screen.blit(pos_surface, (10, 80))
+            
+            # Draw entity count
+            entities_text = f"Entities: {len(self.level_manager.get_entities())}"
+            entities_surface = self.small_font.render(entities_text, True, WHITE)
+            self.screen.blit(entities_surface, (10, 100))
         
-        # Fill based on current energy
-        energy_fill = int(energy_width * (self.energy / 100))
-        energy_color = GREEN
-        if self.energy < 30:
-            energy_color = RED
-        elif self.energy < 60:
-            energy_color = YELLOW
-        
-        pygame.draw.rect(self.screen, energy_color, (energy_x, energy_y, energy_fill, energy_height))
-        
-        # Draw energy text
-        font = pygame.font.Font(None, 24)
-        text = font.render(f"Energy: {int(self.energy)}", True, WHITE)
-        self.screen.blit(text, (energy_x, energy_y + energy_height + 5))
-        
-        # Draw level info
-        level_text = font.render(f"Level: {self.level_manager.current_level}", True, WHITE)
-        self.screen.blit(level_text, (WIDTH - level_text.get_width() - 20, 20))
-        
-        # Draw time
-        elapsed_time = (pygame.time.get_ticks() - self.level_start_time) / 1000
-        time_text = font.render(f"Time: {elapsed_time:.1f}s", True, WHITE)
-        self.screen.blit(time_text, (WIDTH - time_text.get_width() - 20, 50))
+        # Draw aiming line when aiming
+        if self.aiming and self.aim_start_pos and self.aim_current_pos:
+            # Draw line from aim start to current position
+            pygame.draw.line(
+                self.screen,
+                WHITE,
+                self.aim_start_pos,
+                self.aim_current_pos,
+                2
+            )
+            
+            # Draw direction indicator
+            pygame.draw.circle(
+                self.screen,
+                RED,
+                self.aim_start_pos,
+                5
+            )
     
-    def add_floating_text(self, text, x, y, color=(255, 255, 255)):
-        """Add floating text at the specified position"""
-        self.floating_texts.append(FloatingText(text, x, y, color))
+    def add_floating_text(self, text, x, y, color=(255, 255, 255), size=20, lifetime=1.0, velocity=(0, -50)):
+        """Add floating text at the given position."""
+        if hasattr(self, 'floating_text'):
+            self.floating_text.add_text(text, x, y, color=color, size=size, lifetime=lifetime, velocity=velocity)
+        else:
+            # Create a temporary text rendering
+            font = pygame.font.SysFont(None, size)
+            text_surface = font.render(text, True, color)
+            # Calculate position adjusted for camera
+            camera_pos = (0, 0) if not hasattr(self, 'camera') else self.camera.position
+            adjusted_x = x - camera_pos[0]
+            adjusted_y = y - camera_pos[1]
+            # Draw directly on screen
+            self.screen.blit(text_surface, (adjusted_x - text_surface.get_width() // 2, adjusted_y - text_surface.get_height() // 2))
     
     def _start_demo_level(self):
         """Start a demo level for testing."""
@@ -914,26 +932,129 @@ class Game:
         self.state_manager.change_state(GameState.GAME)
     
     def run(self):
-        """Run the game loop."""
+        """Main game loop."""
         running = True
         
-        # Main game loop
+        # Initialize the first level
+        self.level_manager.setup_level(1)
+        
+        # Start the game loop
         while running:
-            # Process events
-            if not self.process_events():
-                running = False
-            
             # Calculate delta time
             self.dt = self.clock.tick(FPS) / 1000.0
             
+            # Process events
+            running = self._process_events()
+            
             # Update game logic
-            self.update()
+            self.update(self.dt)
             
             # Draw the game
             self.draw()
+            
+            # Draw UI elements
+            self.ui_manager.draw(self.screen)
+            
+            # Update the display
+            pygame.display.flip()
         
-        # Clean up and quit
+        # Quit Pygame when the loop ends
         pygame.quit()
+    
+    def _process_events(self):
+        """Process all game events."""
+        # Get current state
+        current_state = self.state_manager.current_state
+        
+        # Get mouse position
+        mouse_pos = pygame.mouse.get_pos()
+        
+        for event in pygame.event.get():
+            # Quit event
+            if event.type == pygame.QUIT:
+                return False
+                
+            # Process UI events first
+            ui_handled = self.ui_manager.handle_event(event)
+            if ui_handled:
+                continue
+                
+            # Key down events
+            if event.type == pygame.KEYDOWN:
+                # Global key events
+                if event.key == pygame.K_ESCAPE:
+                    if current_state == GameState.GAME:
+                        self.state_manager.change_state(GameState.PAUSED)
+                    elif current_state == GameState.PAUSED:
+                        self.state_manager.change_state(GameState.GAME)
+                    elif current_state in [GameState.LEVEL_SELECT, GameState.SETTINGS, GameState.CREDITS]:
+                        self.state_manager.change_state(GameState.MAIN_MENU)
+                    
+                # Debug keys
+                elif event.key == pygame.K_F3:
+                    self.show_debug = not self.show_debug
+                
+                # Game state specific keys
+                if current_state == GameState.GAME:
+                    self._handle_game_keydown(event)
+                
+            # Mouse events
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                # Game state specific mouse events
+                if current_state == GameState.GAME:
+                    self._handle_game_mousedown(event, mouse_pos)
+                
+            # Mouse motion events
+            elif event.type == pygame.MOUSEMOTION:
+                # Game state specific mouse motion
+                if current_state == GameState.GAME:
+                    self._handle_game_mousemotion(event, mouse_pos)
+                    
+            # Mouse button up events
+            elif event.type == pygame.MOUSEBUTTONUP:
+                # Game state specific mouse up events
+                if current_state == GameState.GAME:
+                    self._handle_game_mouseup(event, mouse_pos)
+        
+        return True
+        
+    def _handle_game_keydown(self, event):
+        """Handle key down events in the game state."""
+        if event.key == pygame.K_r:
+            # Reset level
+            self.level_manager.setup_level(self.level_manager.current_level)
+            self.level_start_time = time.time()
+            self.level_playable = False
+        
+    def _handle_game_mousedown(self, event, mouse_pos):
+        """Handle mouse down events in the game state."""
+        if event.button == 1:  # Left mouse button
+            # Start aiming
+            self.aiming = True
+            self.aim_start_pos = mouse_pos
+            
+    def _handle_game_mousemotion(self, event, mouse_pos):
+        """Handle mouse motion events in the game state."""
+        if self.aiming:
+            # Update aim direction
+            self.aim_current_pos = mouse_pos
+            
+    def _handle_game_mouseup(self, event, mouse_pos):
+        """Handle mouse up events in the game state."""
+        if event.button == 1 and self.aiming:  # Left mouse button
+            # Apply force to ball
+            self.aim_end_pos = mouse_pos
+            self.aiming = False
+            
+            # Get ball
+            ball = self.level_manager.get_ball()
+            if ball:
+                # Calculate force direction and magnitude
+                force_x = (self.aim_start_pos[0] - self.aim_end_pos[0]) * 0.1
+                force_y = (self.aim_start_pos[1] - self.aim_end_pos[1]) * 0.1
+                
+                # Apply force to ball
+                ball.apply_force(force_x, force_y)
 
     def _draw_background(self, camera_offset):
         """Draw the background grid and boundaries."""
@@ -981,3 +1102,41 @@ class Game:
             print(f"Error loading high score: {e}")
         
         return 0
+
+    def _draw_grid(self):
+        """Draw a grid on the background."""
+        for x in range(0, WIDTH, GRID_SIZE):
+            pygame.draw.line(
+                self.screen, 
+                GRID_COLOR, 
+                (x, 0), 
+                (x, HEIGHT), 
+                1
+            )
+            
+        for y in range(0, HEIGHT, GRID_SIZE):
+            pygame.draw.line(
+                self.screen, 
+                GRID_COLOR, 
+                (0, y), 
+                (WIDTH, y), 
+                1
+            )
+            
+    def _draw_world_boundary(self, camera_offset):
+        """Draw the world boundary."""
+        # Draw world boundary
+        world_rect = pygame.Rect(
+            -camera_offset[0],
+            -camera_offset[1],
+            self.world_width,
+            self.world_height
+        )
+        
+        # Draw boundary with a thick line
+        pygame.draw.rect(
+            self.screen,
+            BOUNDARY_COLOR,
+            world_rect,
+            BOUNDARY_THICKNESS
+        )

@@ -12,10 +12,10 @@ class GameState(enum.Enum):
     CREDITS = 7
 
 class StateManager:
-    def __init__(self, game):
-        """Initialize the state manager with the game instance."""
-        self.game = game
-        self.state_stack: List[GameState] = [GameState.MAIN_MENU]
+    def __init__(self, initial_state=GameState.MAIN_MENU):
+        """Initialize the state manager with initial state but without game instance."""
+        self.game = None  # Will be set later via set_game
+        self.state_stack: List[GameState] = [initial_state]
         self.history: List[GameState] = []
         self.transitions = {
             GameState.MAIN_MENU: self._handle_main_menu_transition,
@@ -27,6 +27,10 @@ class StateManager:
             GameState.GAME_OVER: self._handle_game_over_transition,
             GameState.CREDITS: self._handle_credits_transition,
         }
+
+    def set_game(self, game):
+        """Set the game reference after initialization."""
+        self.game = game
 
     @property
     def current_state(self) -> GameState:
@@ -46,7 +50,7 @@ class StateManager:
         self._handle_transition(new_state)
         
         # Update UI for the new state
-        if hasattr(self.game, 'ui_manager'):
+        if self.game and hasattr(self.game, 'ui_manager'):
             self.game.ui_manager.setup_for_state(new_state)
 
     def push_state(self, new_state: GameState) -> None:
@@ -58,11 +62,11 @@ class StateManager:
         # Add new state
         self.state_stack.append(new_state)
         
-        # Call transition handler if available
+        # Call transition handler
         self._handle_transition(new_state)
         
         # Update UI for the new state
-        if hasattr(self.game, 'ui_manager'):
+        if self.game and hasattr(self.game, 'ui_manager'):
             self.game.ui_manager.setup_for_state(new_state)
 
     def pop_state(self) -> Optional[GameState]:
@@ -75,7 +79,7 @@ class StateManager:
             self._handle_transition(self.current_state)
             
             # Update UI for the now-current state
-            if hasattr(self.game, 'ui_manager'):
+            if self.game and hasattr(self.game, 'ui_manager'):
                 self.game.ui_manager.setup_for_state(self.current_state)
             
             return old_state
@@ -98,7 +102,7 @@ class StateManager:
             self._handle_transition(new_state)
             
             # Update UI for the new state
-            if hasattr(self.game, 'ui_manager'):
+            if self.game and hasattr(self.game, 'ui_manager'):
                 self.game.ui_manager.setup_for_state(new_state)
 
     def _handle_transition(self, state: GameState) -> None:
@@ -110,13 +114,13 @@ class StateManager:
     def _handle_main_menu_transition(self) -> None:
         """Handle transition to the main menu state."""
         # Reset game-related states
-        if hasattr(self.game, 'level_manager'):
+        if self.game and hasattr(self.game, 'level_manager'):
             pass  # Any cleanup needed
 
     def _handle_level_select_transition(self) -> None:
         """Handle transition to the level select state."""
         # Load level data if needed
-        if hasattr(self.game, 'level_manager'):
+        if self.game and hasattr(self.game, 'level_manager'):
             self.game.level_manager.load_levels_data()
 
     def _handle_settings_transition(self) -> None:
@@ -137,7 +141,7 @@ class StateManager:
     def _handle_level_complete_transition(self) -> None:
         """Handle transition to the level complete state."""
         # Calculate stars, save progress
-        if hasattr(self.game, 'level_manager'):
+        if self.game and hasattr(self.game, 'level_manager'):
             current_level = self.game.level_manager.current_level
             if isinstance(current_level, int):
                 # Save level completion data

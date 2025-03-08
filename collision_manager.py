@@ -1,17 +1,19 @@
 from entities.wall import Wall
-from entities.enhanced_wall import EnhancedWall
 from entities.target import Target
-from entities.enhanced_target import EnhancedTarget
 from entities.surface import Surface
 from entities.powerup import PowerUp
-from entities.enhanced_powerup import EnhancedPowerUp
 from entities.teleporter import Teleporter
 from entities.gravity_well import GravityWell
 from entities.bounce_pad import BouncePad
 from utils.floating_text import FloatingText
 
 class CollisionManager:
-    def __init__(self, game):
+    def __init__(self):
+        """Initialize the collision manager without game reference."""
+        self.game = None  # Will be set later via set_game
+    
+    def set_game(self, game):
+        """Set the game reference after initialization."""
         self.game = game
     
     def check_collisions(self, ball, entities, check_completion=True):
@@ -29,7 +31,7 @@ class CollisionManager:
             hit_required_targets = 0
             
             for entity in entities:
-                if (isinstance(entity, Target) or isinstance(entity, EnhancedTarget)) and hasattr(entity, 'required') and entity.required:
+                if isinstance(entity, Target) and hasattr(entity, 'required') and entity.required:
                     required_targets += 1
                     if hasattr(entity, 'hit') and entity.hit:
                         hit_required_targets += 1
@@ -52,7 +54,7 @@ class CollisionManager:
                 collision_occurred = True
                 
                 # Handle special entity types
-                if isinstance(entity, PowerUp) or isinstance(entity, EnhancedPowerUp):
+                if isinstance(entity, PowerUp):
                     # Power-up collection
                     if hasattr(entity, 'collected') and not entity.collected:
                         entity.collected = True
@@ -61,12 +63,11 @@ class CollisionManager:
                             self.game.score += 100
                 
                 # Check if this collision completes the level
-                if (isinstance(entity, Target) or isinstance(entity, EnhancedTarget)) and entity.required:
+                if isinstance(entity, Target) and entity.required:
                     # Check if all required targets are now hit
                     all_targets_hit = True
                     for target in entities:
-                        if ((isinstance(target, Target) or isinstance(target, EnhancedTarget)) 
-                            and hasattr(target, 'required') and target.required
+                        if (isinstance(target, Target) and hasattr(target, 'required') and target.required
                             and hasattr(target, 'hit') and not target.hit):
                             all_targets_hit = False
                             break

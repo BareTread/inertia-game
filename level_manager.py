@@ -4,11 +4,8 @@ import random
 import pygame
 from typing import Dict, List, Any, Optional
 from entities.wall import Wall
-from entities.enhanced_wall import EnhancedWall
 from entities.target import Target
-from entities.enhanced_target import EnhancedTarget
-from entities.enhanced_ball import EnhancedBall
-from entities.enhanced_powerup import EnhancedPowerUp
+from entities.ball import Ball
 from entities.powerup import PowerUp
 from entities.surface import Surface
 from entities.teleporter import Teleporter
@@ -16,16 +13,41 @@ from entities.bounce_pad import BouncePad
 from entities.gravity_well import GravityWell
 
 class LevelManager:
-    def __init__(self, game):
-        """Initialize the level manager."""
-        self.game = game
+    def __init__(self):
+        """Initialize the level manager without game reference."""
+        self.game = None  # Will be set later via set_game
         self.current_level = None
         self.level_entities = []  # All level entities
         self.ball = None  # Reference to the current ball
         self.max_level = 30  # Maximum level available
         self.is_demo = False
         self.completed_levels = set()
+        self.levels_data = None  # Will be loaded after game reference is set
+    
+    def set_game(self, game):
+        """Set the game reference after initialization."""
+        self.game = game
         self.levels_data = self.load_levels_data()
+    
+    def add_entity(self, entity):
+        """Add entity to the level and set its game reference."""
+        self.level_entities.append(entity)
+        if hasattr(entity, 'game') and self.game is not None:
+            entity.game = self.game
+        return entity
+    
+    def get_entities(self):
+        """Get all entities in the level."""
+        return self.level_entities
+    
+    def get_ball(self):
+        """Get the player's ball."""
+        return self.ball
+    
+    def clear_entities(self):
+        """Clear all entities in the level."""
+        self.level_entities.clear()
+        self.ball = None
     
     def load_levels_data(self):
         """Load levels data from file."""
@@ -74,10 +96,12 @@ class LevelManager:
         from levels.level_generator import generate_level
         
         self.current_level = level_number
-        # Clear game entities and reset ball
-        self.game.entities = []
-        self.level_entities = []
-        self.ball = None
+        # Clear all entities
+        self.clear_entities()
+        
+        # Make sure game's entity list is also cleared
+        if self.game:
+            self.game.entities = []
         
         # Demo level handling
         if level_number == "demo":
@@ -90,26 +114,33 @@ class LevelManager:
             
             # Create a ball
             if "start_pos" in level_data:
-                self.ball = EnhancedBall(level_data["start_pos"][0], level_data["start_pos"][1], 15)
+                self.ball = Ball(level_data["start_pos"][0], level_data["start_pos"][1], 15)
                 self.ball.game = self.game  # Set game reference
+                self.add_entity(self.ball)
+                
+                # Update game's ball reference
+                if self.game:
+                    self.game.ball = self.ball
                 
             # Add walls
             if "walls" in level_data:
                 for wall_data in level_data["walls"]:
-                    if isinstance(wall_data, Wall) or isinstance(wall_data, EnhancedWall):
+                    if isinstance(wall_data, Wall):
                         wall = wall_data
                     else:
-                        wall = EnhancedWall(wall_data["x"], wall_data["y"], wall_data["width"], wall_data["height"])
-                    self.game.entities.append(wall)
-                    self.level_entities.append(wall)
+                        wall = Wall(wall_data["x"], wall_data["y"], wall_data["width"], wall_data["height"])
+                    self.add_entity(wall)
+                    # Keep adding to game.entities for now for backward compatibility
+                    if self.game:
+                        self.game.entities.append(wall)
             
             # Add targets
             if "targets" in level_data:
                 for target_data in level_data["targets"]:
-                    if isinstance(target_data, Target) or isinstance(target_data, EnhancedTarget):
+                    if isinstance(target_data, Target):
                         target = target_data
                     else:
-                        target = EnhancedTarget(
+                        target = Target(
                             target_data["x"], target_data["y"], 
                             target_data.get("radius", 20),
                             target_data.get("points", 100),
@@ -117,8 +148,10 @@ class LevelManager:
                         )
                     target.game = self.game  # Set game reference
                     target.hit = False  # Ensure it starts as not hit
-                    self.game.entities.append(target)
-                    self.level_entities.append(target)
+                    self.add_entity(target)
+                    # Keep adding to game.entities for now for backward compatibility
+                    if self.game:
+                        self.game.entities.append(target)
             
             # Add surfaces
             if "surfaces" in level_data:
@@ -138,10 +171,10 @@ class LevelManager:
             # Add power-ups
             if "powerups" in level_data:
                 for powerup_data in level_data["powerups"]:
-                    if isinstance(powerup_data, PowerUp) or isinstance(powerup_data, EnhancedPowerUp):
+                    if isinstance(powerup_data, PowerUp):
                         powerup = powerup_data
                     else:
-                        powerup = EnhancedPowerUp(
+                        powerup = PowerUp(
                             powerup_data["x"], powerup_data["y"],
                             powerup_data.get("type", "energy")
                         )
@@ -224,21 +257,21 @@ class LevelManager:
         self.ball = None
         
         # Create a ball
-        self.ball = EnhancedBall(300, 300, 15)
+        self.ball = Ball(300, 300, 15)
         self.ball.game = self.game  # Set game reference
         
         # Create walls (border)
         walls = [
             # Top wall
-            EnhancedWall(100, 100, 600, 20),
+            Wall(100, 100, 600, 20),
             # Bottom wall
-            EnhancedWall(100, 500, 600, 20),
+            Wall(100, 500, 600, 20),
             # Left wall
-            EnhancedWall(100, 100, 20, 420),
+            Wall(100, 100, 20, 420),
             # Right wall
-            EnhancedWall(700, 100, 20, 420),
+            Wall(700, 100, 20, 420),
             # Middle obstacle
-            EnhancedWall(300, 300, 200, 20),
+            Wall(300, 300, 200, 20),
         ]
         
         # Add walls to entities
@@ -247,7 +280,7 @@ class LevelManager:
             self.level_entities.append(wall)
         
         # Create a target
-        target = EnhancedTarget(600, 400, 20, 100, True)
+        target = Target(600, 400, 20, 100, True)
         target.game = self.game  # Set game reference
         target.hit = False  # Explicitly set to False to ensure it's not completed yet
         print(f"Demo target created at (600, 400) with hit={target.hit}, required={target.required}")
@@ -260,7 +293,7 @@ class LevelManager:
         self.level_entities.append(surface)
         
         # Create a power-up
-        powerup = EnhancedPowerUp(200, 200, "energy")
+        powerup = PowerUp(200, 200, "energy")
         self.game.entities.append(powerup)
         self.level_entities.append(powerup)
         
@@ -357,7 +390,7 @@ class LevelManager:
         unhit_required_targets = []
         
         for entity in self.level_entities:
-            is_target = isinstance(entity, Target) or isinstance(entity, EnhancedTarget)
+            is_target = isinstance(entity, Target)
             if is_target:
                 has_required = hasattr(entity, 'required')
                 is_required = entity.required if has_required else False
@@ -415,7 +448,7 @@ class LevelManager:
         # Check if we have any required targets
         has_required_target = False
         for entity in self.level_entities:
-            if (isinstance(entity, Target) or isinstance(entity, EnhancedTarget)) and hasattr(entity, 'required') and entity.required:
+            if isinstance(entity, Target) and hasattr(entity, 'required') and entity.required:
                 has_required_target = True
                 break
         
@@ -431,7 +464,7 @@ class LevelManager:
                 center_y = self.ball.y + 200
             
             # Create and add a required target
-            target = EnhancedTarget(center_x, center_y, 25, 100, True)
+            target = Target(center_x, center_y, 25, 100, True)
             target.game = self.game
             target.hit = False
             self.game.entities.append(target)
